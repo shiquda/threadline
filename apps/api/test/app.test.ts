@@ -34,6 +34,25 @@ describe("Threadline API decision loop", () => {
     expect(response.json()).toMatchObject({ code: "unauthorized" });
   });
 
+  it("allows CORS preflight before API authentication", async () => {
+    await app.close();
+    store.close();
+    store = new ThreadlineStore(":memory:");
+    app = await buildApp({ store, token, corsOrigin: "http://127.0.0.1:3001" });
+
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/api/v1/workboard",
+      headers: {
+        origin: "http://127.0.0.1:3001",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "authorization",
+      },
+    });
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:3001");
+  });
+
   it("creates and idempotently resolves a decision while closing Inbox attention", async () => {
     const initiativeResponse = await app.inject({
       method: "POST",

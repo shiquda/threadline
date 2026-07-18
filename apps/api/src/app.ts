@@ -75,7 +75,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   }
 
   app.addHook("onRequest", async (request, reply) => {
-    if (!request.url.startsWith("/api/v1")) return;
+    if (request.method === "OPTIONS" || !request.url.startsWith("/api/v1")) return;
     const authorization = request.headers.authorization;
     const supplied = authorization?.startsWith("Bearer ")
       ? authorization.slice("Bearer ".length)
