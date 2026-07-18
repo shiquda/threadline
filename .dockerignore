@@ -1,6 +1,7 @@
 .git
 .agent
 .env
+.env.production
 node_modules
 **/dist
 coverage
