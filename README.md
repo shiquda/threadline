@@ -85,3 +85,11 @@ Never commit `.env`, Tokens, or SQLite database files.
 | `THREADLINE_DATABASE` | no | `threadline.sqlite` locally, `/data/threadline.sqlite` in Docker |
 | `THREADLINE_WEB_DIR` | no | disabled locally, `/app/public` in Docker |
 | `THREADLINE_CORS_ORIGIN` | no | disabled |
+| `THREADLINE_TELEGRAM_BOT_TOKEN` | no | disabled unless paired with `THREADLINE_TELEGRAM_CHAT_ID` |
+| `THREADLINE_TELEGRAM_CHAT_ID` | no | disabled unless paired with `THREADLINE_TELEGRAM_BOT_TOKEN` |
+| `THREADLINE_HTTP_PROXY` | no | none; use `http://127.0.0.1:7890` for local Clash |
+| `THREADLINE_NOTIFICATION_RETRY_ATTEMPTS` | no | `3`, including the initial attempt |
+
+When Telegram is configured, new Decision requests and Alert submissions are delivered as
+one-way messages. Delivery is asynchronous: Telegram errors are recorded in the API log
+without changing the successful creation of the underlying Threadline record.

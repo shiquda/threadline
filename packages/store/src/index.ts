@@ -1,1 +1,1 @@
-export { StoreError, ThreadlineStore } from "./store.js";
+export { StoreError, ThreadlineStore, type CreateSubmissionOutcome } from "./store.js";

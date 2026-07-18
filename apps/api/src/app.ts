@@ -13,15 +13,18 @@ import {
   UpdateNotificationInputSchema,
   type CreateInitiativeInput,
   type CreateSubmissionInput,
+  type Decision,
   type DecisionStatus,
   type InitiativeStatus,
   type ResolveDecisionInput,
+  type Submission,
   type UpdateInitiativeInput,
   type UpdateNotificationInput,
 } from "@threadline/protocol";
 import { StoreError, ThreadlineStore } from "@threadline/store";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { Type } from "@sinclair/typebox";
+import type { NotificationEvent, NotificationPublisher } from "./notifier.js";
 
 export interface AppOptions {
   store: ThreadlineStore;
@@ -29,6 +32,7 @@ export interface AppOptions {
   logger?: boolean;
   corsOrigin?: string;
   webDir?: string;
+  publisher?: NotificationPublisher;
 }
 
 const IdParamsSchema = Type.Object({ id: Type.String({ minLength: 1 }) });
@@ -59,6 +63,19 @@ function tokenMatches(expected: string, supplied: string): boolean {
     expectedBuffer.length === suppliedBuffer.length &&
     timingSafeEqual(expectedBuffer, suppliedBuffer)
   );
+}
+
+function notificationEvent(result: {
+  submission: Submission;
+  decision: Decision | null;
+}): NotificationEvent | undefined {
+  if (result.submission.kind === "decision_request" && result.decision) {
+    return { type: "decision_created", submission: result.submission, decision: result.decision };
+  }
+  if (result.submission.kind === "alert") {
+    return { type: "alert_created", submission: result.submission };
+  }
+  return undefined;
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
@@ -155,11 +172,20 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     "/api/v1/submissions",
     { schema: { body: CreateSubmissionInputSchema } },
     async (request, reply) => {
-      const result = options.store.createSubmission(
+      const outcome = options.store.createSubmissionWithOutcome(
         request.body as CreateSubmissionInput,
         idempotencyKey(request.headers),
       );
-      return reply.code(201).send(result);
+      const event = outcome.created ? notificationEvent(outcome.result) : undefined;
+      if (event && options.publisher) {
+        void options.publisher.publish(event).catch(() => {
+          app.log.error(
+            { notification_type: event.type, submission_id: event.submission.id },
+            "Outbound notification delivery failed",
+          );
+        });
+      }
+      return reply.code(201).send(outcome.result);
     },
   );
 

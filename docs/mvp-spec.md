@@ -310,7 +310,7 @@ compose.yaml
 
 ## 11. MVP 非目标
 
-- Telegram 或其他消息通道。
+- Telegram 双向交互或其他消息通道。Outbound Telegram delivery for new Decisions and Alerts is supported through environment configuration.
 - Agent session 深链接。
 - 多用户、组织、角色和细粒度权限。
 - Runtime 日志、状态监控、生命周期管理或反向调用。

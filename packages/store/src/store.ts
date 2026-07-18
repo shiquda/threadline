@@ -28,6 +28,11 @@ type IdempotencyRow = {
   response_json: string;
 };
 
+export interface CreateSubmissionOutcome {
+  result: SubmissionResult;
+  created: boolean;
+}
+
 export class StoreError extends Error {
   constructor(
     public readonly code: "not_found" | "conflict" | "invalid_request",
@@ -163,6 +168,13 @@ export class ThreadlineStore {
   }
 
   createSubmission(input: CreateSubmissionInput, idempotencyKey?: string): SubmissionResult {
+    return this.createSubmissionWithOutcome(input, idempotencyKey).result;
+  }
+
+  createSubmissionWithOutcome(
+    input: CreateSubmissionInput,
+    idempotencyKey?: string,
+  ): CreateSubmissionOutcome {
     if (input.kind === "decision_request" && !input.decision) {
       throw new StoreError("invalid_request", "decision_request requires decision data");
     }
@@ -177,7 +189,7 @@ export class ThreadlineStore {
       "submission.create",
       input,
     );
-    if (cached) return cached;
+    if (cached) return { result: cached, created: false };
 
     const result = this.db.transaction((): SubmissionResult => {
       const timestamp = now();
@@ -303,7 +315,7 @@ export class ThreadlineStore {
       this.writeIdempotent(idempotencyKey, "submission.create", input, submissionResult);
       return submissionResult;
     })();
-    return result;
+    return { result, created: true };
   }
 
   private notificationSuppression(

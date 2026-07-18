@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ThreadlineStore } from "@threadline/store";
 import type { FastifyInstance } from "fastify";
+import type { NotificationEvent, NotificationPublisher } from "../src/notifier.js";
 import { buildApp } from "../src/app.js";
 
 const token = "test-token";
@@ -17,10 +18,14 @@ const actor = {
 describe("Threadline API decision loop", () => {
   let store: ThreadlineStore;
   let app: FastifyInstance;
+  let events: NotificationEvent[];
+  let publisher: NotificationPublisher;
 
   beforeEach(async () => {
     store = new ThreadlineStore(":memory:");
-    app = await buildApp({ store, token });
+    events = [];
+    publisher = { publish: async (event) => void events.push(event) };
+    app = await buildApp({ store, token, publisher });
   });
 
   afterEach(async () => {
@@ -94,6 +99,12 @@ describe("Threadline API decision loop", () => {
       notification: { id: string; status: string };
     }>();
     expect(result.notification.status).toBe("active");
+    expect(events).toMatchObject([
+      {
+        type: "decision_created",
+        decision: { id: result.decision.id, question: "Which region should host Threadline?" },
+      },
+    ]);
 
     const submissionRetry = await app.inject({
       method: "POST",
@@ -103,6 +114,7 @@ describe("Threadline API decision loop", () => {
     });
     expect(submissionRetry.statusCode).toBe(201);
     expect(submissionRetry.json()).toEqual(submissionResponse.json());
+    expect(events).toHaveLength(1);
 
     const inboxBefore = await app.inject({
       method: "GET",
@@ -210,5 +222,32 @@ describe("Threadline API decision loop", () => {
       headers: authorization,
     });
     expect(inbox.json()).toEqual([]);
+  });
+
+  it("delivers alerts without allowing an outbound failure to change the API result", async () => {
+    await app.close();
+    store.close();
+    store = new ThreadlineStore(":memory:");
+    publisher = { publish: async () => Promise.reject(new Error("network unavailable")) };
+    app = await buildApp({ store, token, publisher });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/submissions",
+      headers: authorization,
+      payload: {
+        kind: "alert",
+        title: "Deployment needs attention",
+        summary: "The reverse proxy did not start.",
+        attention_policy: "interrupt",
+        actor,
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ submission: { kind: "alert" } });
+    await new Promise((resolve) => setImmediate(resolve));
+    const saved = await app.inject({ method: "GET", url: "/api/v1/submissions", headers: authorization });
+    expect(saved.json()).toMatchObject([{ kind: "alert" }]);
   });
 });

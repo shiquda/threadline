@@ -2,6 +2,7 @@
 import { resolve } from "node:path";
 import { ThreadlineStore } from "@threadline/store";
 import { buildApp } from "./app.js";
+import { createPublisherFromEnvironment } from "./notifier.js";
 
 const token = process.env.THREADLINE_TOKEN;
 if (!token) {
@@ -10,6 +11,7 @@ if (!token) {
 
 const databasePath = resolve(process.env.THREADLINE_DATABASE ?? "threadline.sqlite");
 const webDir = process.env.THREADLINE_WEB_DIR;
+const publisher = createPublisherFromEnvironment();
 const port = Number.parseInt(process.env.THREADLINE_PORT ?? "3000", 10);
 const host = process.env.THREADLINE_HOST ?? "127.0.0.1";
 const store = new ThreadlineStore(databasePath);
@@ -17,6 +19,7 @@ const app = await buildApp({
   store,
   token,
   logger: true,
+  ...(publisher ? { publisher } : {}),
   ...(webDir ? { webDir: resolve(webDir) } : {}),
   ...(process.env.THREADLINE_CORS_ORIGIN
     ? { corsOrigin: process.env.THREADLINE_CORS_ORIGIN }
