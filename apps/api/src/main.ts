@@ -9,6 +9,7 @@ if (!token) {
 }
 
 const databasePath = resolve(process.env.THREADLINE_DATABASE ?? "threadline.sqlite");
+const webDir = process.env.THREADLINE_WEB_DIR;
 const port = Number.parseInt(process.env.THREADLINE_PORT ?? "3000", 10);
 const host = process.env.THREADLINE_HOST ?? "127.0.0.1";
 const store = new ThreadlineStore(databasePath);
@@ -16,6 +17,7 @@ const app = await buildApp({
   store,
   token,
   logger: true,
+  ...(webDir ? { webDir: resolve(webDir) } : {}),
   ...(process.env.THREADLINE_CORS_ORIGIN
     ? { corsOrigin: process.env.THREADLINE_CORS_ORIGIN }
     : {}),

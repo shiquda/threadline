@@ -1,5 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import {
   CreateInitiativeInputSchema,
   CreateSubmissionInputSchema,
@@ -25,6 +28,7 @@ export interface AppOptions {
   token: string;
   logger?: boolean;
   corsOrigin?: string;
+  webDir?: string;
 }
 
 const IdParamsSchema = Type.Object({ id: Type.String({ minLength: 1 }) });
@@ -63,6 +67,13 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   await app.register(cors, {
     origin: options.corsOrigin ?? false,
   });
+
+  if (options.webDir && existsSync(options.webDir)) {
+    await app.register(fastifyStatic, {
+      root: resolve(options.webDir),
+      wildcard: false,
+    });
+  }
 
   app.addHook("onRequest", async (request, reply) => {
     if (!request.url.startsWith("/api/v1")) return;

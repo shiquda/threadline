@@ -8,11 +8,12 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && npm run build -w @threadline/web",
     "typecheck": "tsc -b --pretty false",
     "test": "npm run build && vitest run",
     "dev:api": "npm run dev -w @threadline/api",
-    "dev:cli": "npm run dev -w @threadline/cli --"
+    "dev:cli": "npm run dev -w @threadline/cli --",
+    "dev:web": "npm run dev -w @threadline/web"
   },
   "engines": {
     "node": ">=22"

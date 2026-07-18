@@ -2,7 +2,7 @@
 
 Threadline is a self-hosted Human-Agent Gateway for durable work context, attention management, and decision closure across heterogeneous agent sessions.
 
-The current branch implements the UI-independent MVP core: a SQLite-backed API, a configurable CLI, and an installable Agent Skill. The Web client will be implemented after the separate design brief has been processed.
+Threadline includes a responsive Web workspace backed by the same API as its CLI, alongside a SQLite-backed Gateway and an installable Agent Skill.
 
 ## Documentation
 
@@ -71,7 +71,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-The API listens on `http://127.0.0.1:3000` by default. SQLite data is stored in the named `threadline-data` volume and survives container replacement.
+The complete Web workspace and API are served from `http://127.0.0.1:3000` by default. SQLite data is stored in the named `threadline-data` volume and survives container replacement.
 
 Never commit `.env`, Tokens, or SQLite database files.
 
@@ -83,4 +83,5 @@ Never commit `.env`, Tokens, or SQLite database files.
 | `THREADLINE_HOST` | no | `127.0.0.1` locally, `0.0.0.0` in Docker |
 | `THREADLINE_PORT` | no | `3000` |
 | `THREADLINE_DATABASE` | no | `threadline.sqlite` locally, `/data/threadline.sqlite` in Docker |
+| `THREADLINE_WEB_DIR` | no | disabled locally, `/app/public` in Docker |
 | `THREADLINE_CORS_ORIGIN` | no | disabled |

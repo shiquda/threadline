@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "@fastify/static": "^10.1.0",
     "@threadline/protocol": "0.1.0",
     "@threadline/store": "0.1.0",
     "fastify": "^5.10.0"
