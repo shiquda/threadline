@@ -1,5 +1,7 @@
 node_modules/
 dist/
+apps/web/dist-tsc/
+apps/web/inbox-*.png
 coverage/
 *.log
 *.sqlite
@@ -7,4 +9,3 @@ coverage/
 *.sqlite-wal
 .env
 .agent/
-
