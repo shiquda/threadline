@@ -76,9 +76,9 @@ The complete Web workspace and API are served from `http://127.0.0.1:3000` by de
 
 Never commit `.env`, Tokens, or SQLite database files.
 
-For a production VPS behind Cloudflare Tunnel and Access, use
+For a production VPS behind Cloudflare and Nginx, use
 `compose.production.yaml` and the [VPS deployment guide](docs/vps-deployment.md).
-This production Compose file deliberately exposes no host port.
+This production Compose file binds the Gateway to `127.0.0.1` only.
 
 ## API configuration
 

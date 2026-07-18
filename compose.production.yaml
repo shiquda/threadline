@@ -12,6 +12,8 @@ services:
       THREADLINE_PORT: 3000
       THREADLINE_DATABASE: /data/threadline.sqlite
       THREADLINE_WEB_DIR: /app/public
+    ports:
+      - "127.0.0.1:${THREADLINE_HTTP_PORT:-3000}:3000"
     volumes:
       - threadline-data:/data
     read_only: true
@@ -34,23 +36,6 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
-
-  cloudflared:
-    image: cloudflare/cloudflared:2025.2.1
-    restart: unless-stopped
-    depends_on:
-      gateway:
-        condition: service_healthy
-    environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env.production}
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env.production}
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=32m
 
 volumes:
   threadline-data:
