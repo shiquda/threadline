@@ -71,7 +71,6 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   if (options.webDir && existsSync(options.webDir)) {
     await app.register(fastifyStatic, {
       root: resolve(options.webDir),
-      wildcard: false,
     });
   }
 
