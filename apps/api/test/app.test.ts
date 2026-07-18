@@ -39,6 +39,47 @@ describe("Threadline API decision loop", () => {
     expect(response.json()).toMatchObject({ code: "unauthorized" });
   });
 
+  it("sets browser security headers and rejects request bodies above the configured limit", async () => {
+    await app.close();
+    store.close();
+    store = new ThreadlineStore(":memory:");
+    app = await buildApp({ store, token, bodyLimit: 128 });
+
+    const health = await app.inject({ method: "GET", url: "/health" });
+    expect(health.headers["content-security-policy"]).toContain("default-src 'self'");
+    expect(health.headers["x-frame-options"]).toBe("SAMEORIGIN");
+    expect(health.headers["referrer-policy"]).toBe("no-referrer");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/submissions",
+      headers: { ...authorization, "content-type": "application/json" },
+      payload: JSON.stringify({ padding: "x".repeat(256) }),
+    });
+    expect(response.statusCode).toBe(413);
+  });
+
+  it("limits repeated API requests while allowing health checks", async () => {
+    await app.close();
+    store.close();
+    store = new ThreadlineStore(":memory:");
+    app = await buildApp({
+      store,
+      token,
+      rateLimitMax: 1,
+      rateLimitWindowMs: 60_000,
+      rateLimitKeyGenerator: () => "test-client",
+    });
+
+    expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
+    const repeatedRequest = {
+      method: "GET" as const,
+      url: "/api/v1/inbox",
+    };
+    expect((await app.inject(repeatedRequest)).statusCode).toBe(401);
+    expect((await app.inject(repeatedRequest)).statusCode).toBe(429);
+  });
+
   it("allows CORS preflight before API authentication", async () => {
     await app.close();
     store.close();

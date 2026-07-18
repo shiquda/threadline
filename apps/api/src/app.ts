@@ -2,6 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
+import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import {
   CreateInitiativeInputSchema,
@@ -22,7 +24,7 @@ import {
   type UpdateNotificationInput,
 } from "@threadline/protocol";
 import { StoreError, ThreadlineStore } from "@threadline/store";
-import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyRequest } from "fastify";
 import { Type } from "@sinclair/typebox";
 import type { NotificationEvent, NotificationPublisher } from "./notifier.js";
 
@@ -33,6 +35,11 @@ export interface AppOptions {
   corsOrigin?: string;
   webDir?: string;
   publisher?: NotificationPublisher;
+  bodyLimit?: number;
+  rateLimitMax?: number;
+  rateLimitWindowMs?: number;
+  rateLimitKeyGenerator?: (request: FastifyRequest) => string | number | Promise<string | number>;
+  trustProxy?: boolean;
 }
 
 const IdParamsSchema = Type.Object({ id: Type.String({ minLength: 1 }) });
@@ -79,7 +86,35 @@ function notificationEvent(result: {
 }
 
 export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    bodyLimit: options.bodyLimit ?? 262_144,
+    trustProxy: options.trustProxy ?? false,
+  });
+
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      directives: {
+        baseUri: ["'none'"],
+        defaultSrc: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+        imgSrc: ["'self'", "data:"],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    referrerPolicy: { policy: "no-referrer" },
+  });
+
+  await app.register(rateLimit, {
+    allowList: (request) => request.url === "/health",
+    keyGenerator: options.rateLimitKeyGenerator ?? ((request) => request.ip),
+    max: options.rateLimitMax ?? 120,
+    timeWindow: options.rateLimitWindowMs ?? 60_000,
+  });
 
   await app.register(cors, {
     origin: options.corsOrigin ?? false,
@@ -91,7 +126,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     });
   }
 
-  app.addHook("onRequest", async (request, reply) => {
+  app.addHook("preHandler", async (request, reply) => {
     if (request.method === "OPTIONS" || !request.url.startsWith("/api/v1")) return;
     const authorization = request.headers.authorization;
     const supplied = authorization?.startsWith("Bearer ")

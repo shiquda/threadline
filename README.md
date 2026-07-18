@@ -9,6 +9,7 @@ Threadline includes a responsive Web workspace backed by the same API as its CLI
 - [MVP product and technical spec](docs/mvp-spec.md)
 - [UI design brief](docs/ui-design-brief.md)
 - [Agent Skill](skills/threadline-gateway/SKILL.md)
+- [VPS production deployment](docs/vps-deployment.md)
 
 ## Local development
 
@@ -75,6 +76,10 @@ The complete Web workspace and API are served from `http://127.0.0.1:3000` by de
 
 Never commit `.env`, Tokens, or SQLite database files.
 
+For a production VPS behind Cloudflare Tunnel and Access, use
+`compose.production.yaml` and the [VPS deployment guide](docs/vps-deployment.md).
+This production Compose file deliberately exposes no host port.
+
 ## API configuration
 
 | Variable | Required | Default |
@@ -85,6 +90,10 @@ Never commit `.env`, Tokens, or SQLite database files.
 | `THREADLINE_DATABASE` | no | `threadline.sqlite` locally, `/data/threadline.sqlite` in Docker |
 | `THREADLINE_WEB_DIR` | no | disabled locally, `/app/public` in Docker |
 | `THREADLINE_CORS_ORIGIN` | no | disabled |
+| `THREADLINE_BODY_LIMIT_BYTES` | no | `262144` |
+| `THREADLINE_RATE_LIMIT_MAX` | no | `120` requests per window |
+| `THREADLINE_RATE_LIMIT_WINDOW_MS` | no | `60000` |
+| `THREADLINE_TRUST_PROXY` | no | `false`; set `true` only behind the Cloudflare Tunnel |
 | `THREADLINE_TELEGRAM_BOT_TOKEN` | no | disabled unless paired with `THREADLINE_TELEGRAM_CHAT_ID` |
 | `THREADLINE_TELEGRAM_CHAT_ID` | no | disabled unless paired with `THREADLINE_TELEGRAM_BOT_TOKEN` |
 | `THREADLINE_HTTP_PROXY` | no | none; use `http://127.0.0.1:7890` for local Clash |
