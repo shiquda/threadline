@@ -1,0 +1,562 @@
+import { createHash, randomUUID } from "node:crypto";
+import Database from "better-sqlite3";
+import type {
+  ActorContext,
+  AuditEvent,
+  CreateInitiativeInput,
+  CreateSubmissionInput,
+  Decision,
+  InboxItem,
+  Initiative,
+  InitiativeStatus,
+  Notification,
+  ResolveDecisionInput,
+  Submission,
+  SubmissionResult,
+  UpdateInitiativeInput,
+  UpdateNotificationInput,
+  Workboard,
+} from "@threadline/protocol";
+import { migrate } from "./migrations.js";
+
+type DecisionRow = Omit<Decision, "options"> & { options_json: string | null };
+type EventRow = Omit<AuditEvent, "payload"> & { payload_json: string | null };
+type IdempotencyRow = {
+  operation: string;
+  request_hash: string;
+  response_json: string;
+};
+
+export class StoreError extends Error {
+  constructor(
+    public readonly code: "not_found" | "conflict" | "invalid_request",
+    message: string,
+  ) {
+    super(message);
+    this.name = "StoreError";
+  }
+}
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function sourceFor(actor: ActorContext): string {
+  return actor.source ?? actor.runtime ?? actor.actor_name;
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableSerialize(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export class ThreadlineStore {
+  readonly db: Database.Database;
+
+  constructor(filename: string) {
+    this.db = new Database(filename);
+    this.db.pragma("foreign_keys = ON");
+    this.db.pragma("journal_mode = WAL");
+    migrate(this.db);
+  }
+
+  close(): void {
+    this.db.close();
+  }
+
+  createInitiative(input: CreateInitiativeInput, idempotencyKey?: string): Initiative {
+    const cached = this.readIdempotent<Initiative>(idempotencyKey, "initiative.create", input);
+    if (cached) return cached;
+
+    const timestamp = now();
+    const initiative: Initiative = {
+      id: randomUUID(),
+      title: input.title,
+      intent: input.intent,
+      status: input.status ?? "active",
+      next_step: input.next_step ?? null,
+      created_at: timestamp,
+      updated_at: timestamp,
+      last_activity_at: timestamp,
+      created_by: input.actor.actor_name,
+    };
+
+    const write = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO initiatives
+           (id, title, intent, status, next_step, created_at, updated_at, last_activity_at, created_by)
+           VALUES (@id, @title, @intent, @status, @next_step, @created_at, @updated_at,
+                   @last_activity_at, @created_by)`,
+        )
+        .run(initiative);
+      this.writeEvent("initiative", initiative.id, "initiative.created", input.actor, {
+        status: initiative.status,
+      });
+      this.writeIdempotent(idempotencyKey, "initiative.create", input, initiative);
+    });
+    write();
+    return initiative;
+  }
+
+  getInitiative(id: string): Initiative {
+    const initiative = this.db.prepare("SELECT * FROM initiatives WHERE id = ?").get(id) as
+      | Initiative
+      | undefined;
+    if (!initiative) {
+      throw new StoreError("not_found", `Initiative ${id} was not found`);
+    }
+    return initiative;
+  }
+
+  listInitiatives(status?: InitiativeStatus): Initiative[] {
+    if (status) {
+      return this.db
+        .prepare("SELECT * FROM initiatives WHERE status = ? ORDER BY last_activity_at DESC")
+        .all(status) as Initiative[];
+    }
+    return this.db
+      .prepare("SELECT * FROM initiatives ORDER BY last_activity_at DESC")
+      .all() as Initiative[];
+  }
+
+  updateInitiative(id: string, input: UpdateInitiativeInput): Initiative {
+    const current = this.getInitiative(id);
+    const timestamp = now();
+    const updated: Initiative = {
+      ...current,
+      title: input.title ?? current.title,
+      intent: input.intent ?? current.intent,
+      status: input.status ?? current.status,
+      next_step: hasOwn(input, "next_step") ? (input.next_step ?? null) : current.next_step,
+      updated_at: timestamp,
+      last_activity_at: timestamp,
+    };
+
+    const write = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE initiatives
+           SET title = @title, intent = @intent, status = @status, next_step = @next_step,
+               updated_at = @updated_at, last_activity_at = @last_activity_at
+           WHERE id = @id`,
+        )
+        .run(updated);
+      this.writeEvent("initiative", id, "initiative.updated", input.actor, {
+        status: updated.status,
+        next_step: updated.next_step,
+      });
+    });
+    write();
+    return updated;
+  }
+
+  createSubmission(input: CreateSubmissionInput, idempotencyKey?: string): SubmissionResult {
+    if (input.kind === "decision_request" && !input.decision) {
+      throw new StoreError("invalid_request", "decision_request requires decision data");
+    }
+    if (input.kind !== "decision_request" && input.decision) {
+      throw new StoreError("invalid_request", "Only decision_request may include decision data");
+    }
+    if (input.initiative_id) {
+      this.getInitiative(input.initiative_id);
+    }
+    const cached = this.readIdempotent<SubmissionResult>(
+      idempotencyKey,
+      "submission.create",
+      input,
+    );
+    if (cached) return cached;
+
+    const result = this.db.transaction((): SubmissionResult => {
+      const timestamp = now();
+      const submission: Submission = {
+        id: randomUUID(),
+        kind: input.kind,
+        title: input.title,
+        summary: input.summary,
+        detail: input.detail ?? null,
+        detail_ref: input.detail_ref ?? null,
+        initiative_id: input.initiative_id ?? null,
+        attention_policy: input.attention_policy,
+        dedupe_key: input.dedupe_key ?? null,
+        source: sourceFor(input.actor),
+        runtime: input.actor.runtime ?? null,
+        agent: input.actor.agent ?? null,
+        session_id: input.actor.session_id ?? null,
+        observed_at: input.observed ? timestamp : null,
+        created_at: timestamp,
+        created_by: input.actor.actor_name,
+      };
+      this.db
+        .prepare(
+          `INSERT INTO submissions
+           (id, kind, title, summary, detail, detail_ref, initiative_id, attention_policy,
+            dedupe_key, source, runtime, agent, session_id, observed_at, created_at, created_by)
+           VALUES (@id, @kind, @title, @summary, @detail, @detail_ref, @initiative_id,
+                   @attention_policy, @dedupe_key, @source, @runtime, @agent, @session_id,
+                   @observed_at, @created_at, @created_by)`,
+        )
+        .run(submission);
+
+      let decision: Decision | null = null;
+      if (input.decision) {
+        decision = {
+          id: randomUUID(),
+          submission_id: submission.id,
+          initiative_id: submission.initiative_id,
+          question: input.decision.question,
+          options: input.decision.options ?? null,
+          risk_level: input.decision.risk_level ?? "low",
+          status: "open",
+          resolution: null,
+          resolved_via: null,
+          resolved_by: null,
+          resolved_at: null,
+          created_at: timestamp,
+          updated_at: timestamp,
+        };
+        this.db
+          .prepare(
+            `INSERT INTO decisions
+             (id, submission_id, initiative_id, question, options_json, risk_level, status,
+              resolution, resolved_via, resolved_by, resolved_at, created_at, updated_at)
+             VALUES (@id, @submission_id, @initiative_id, @question, @options_json, @risk_level,
+                     @status, @resolution, @resolved_via, @resolved_by, @resolved_at, @created_at,
+                     @updated_at)`,
+          )
+          .run({ ...decision, options_json: decision.options ? JSON.stringify(decision.options) : null });
+      }
+
+      const suppression = this.notificationSuppression(input);
+      const notification: Notification = {
+        id: randomUUID(),
+        submission_id: submission.id,
+        channel: "web",
+        status: suppression ? "suppressed" : "active",
+        suppression_reason: suppression,
+        snoozed_until: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
+      this.db
+        .prepare(
+          `INSERT INTO notifications
+           (id, submission_id, channel, status, suppression_reason, snoozed_until, created_at, updated_at)
+           VALUES (@id, @submission_id, @channel, @status, @suppression_reason, @snoozed_until,
+                   @created_at, @updated_at)`,
+        )
+        .run(notification);
+
+      if (submission.initiative_id) {
+        this.db
+          .prepare(
+            `UPDATE initiatives
+             SET status = CASE
+                   WHEN ? = 'decision_request' AND status IN ('active', 'waiting_for_agent')
+                     THEN 'waiting_for_jim'
+                   ELSE status
+                 END,
+                 last_activity_at = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(submission.kind, timestamp, timestamp, submission.initiative_id);
+      }
+
+      this.writeEvent("submission", submission.id, "submission.created", input.actor, {
+        kind: submission.kind,
+        notification_status: notification.status,
+      });
+      if (decision) {
+        this.writeEvent("decision", decision.id, "decision.created", input.actor, {
+          risk_level: decision.risk_level,
+        });
+      }
+
+      const submissionResult = { submission, decision, notification };
+      this.writeIdempotent(idempotencyKey, "submission.create", input, submissionResult);
+      return submissionResult;
+    })();
+    return result;
+  }
+
+  private notificationSuppression(
+    input: CreateSubmissionInput,
+  ): "observed" | "record_only" | "digest" | "deduplicated" | null {
+    if (input.observed) return "observed";
+    if (input.attention_policy === "record_only") return "record_only";
+    if (input.attention_policy === "digest") return "digest";
+    if (!input.dedupe_key) return null;
+
+    const active = this.db
+      .prepare(
+        `SELECT n.id
+         FROM notifications n
+         JOIN submissions s ON s.id = n.submission_id
+         WHERE s.dedupe_key = ? AND n.status IN ('active', 'read', 'snoozed')
+         LIMIT 1`,
+      )
+      .get(input.dedupe_key);
+    return active ? "deduplicated" : null;
+  }
+
+  getSubmission(id: string): Submission {
+    const row = this.db.prepare("SELECT * FROM submissions WHERE id = ?").get(id) as
+      | Submission
+      | undefined;
+    if (!row) throw new StoreError("not_found", `Submission ${id} was not found`);
+    return row;
+  }
+
+  listSubmissions(initiativeId?: string): Submission[] {
+    if (initiativeId) {
+      return this.db
+        .prepare("SELECT * FROM submissions WHERE initiative_id = ? ORDER BY created_at DESC")
+        .all(initiativeId) as Submission[];
+    }
+    return this.db.prepare("SELECT * FROM submissions ORDER BY created_at DESC").all() as Submission[];
+  }
+
+  getDecision(id: string): Decision {
+    const row = this.db.prepare("SELECT * FROM decisions WHERE id = ?").get(id) as
+      | DecisionRow
+      | undefined;
+    if (!row) throw new StoreError("not_found", `Decision ${id} was not found`);
+    return this.mapDecision(row);
+  }
+
+  listDecisions(status?: string): Decision[] {
+    const rows = status
+      ? (this.db
+          .prepare("SELECT * FROM decisions WHERE status = ? ORDER BY created_at DESC")
+          .all(status) as DecisionRow[])
+      : (this.db.prepare("SELECT * FROM decisions ORDER BY created_at DESC").all() as DecisionRow[]);
+    return rows.map((row) => this.mapDecision(row));
+  }
+
+  resolveDecision(id: string, input: ResolveDecisionInput): Decision {
+    return this.db.transaction(() => {
+      const current = this.getDecision(id);
+      if (current.status === "resolved") {
+        if (current.resolution === input.outcome) return current;
+        throw new StoreError("conflict", `Decision ${id} is already resolved with a different outcome`);
+      }
+      if (current.status !== "open" && current.status !== "seen") {
+        throw new StoreError("conflict", `Decision ${id} cannot be resolved from ${current.status}`);
+      }
+
+      const timestamp = now();
+      this.db
+        .prepare(
+          `UPDATE decisions
+           SET status = 'resolved', resolution = ?, resolved_via = ?, resolved_by = ?,
+               resolved_at = ?, updated_at = ?
+           WHERE id = ?`,
+        )
+        .run(
+          input.outcome,
+          input.resolved_via,
+          input.actor.actor_name,
+          timestamp,
+          timestamp,
+          id,
+        );
+      this.db
+        .prepare(
+          `UPDATE notifications
+           SET status = 'resolved', snoozed_until = NULL, updated_at = ?
+           WHERE submission_id = ? AND status IN ('active', 'read', 'snoozed')`,
+        )
+        .run(timestamp, current.submission_id);
+      if (current.initiative_id) {
+        this.db
+          .prepare(
+            `UPDATE initiatives
+             SET status = CASE WHEN status = 'waiting_for_jim' THEN 'waiting_for_agent' ELSE status END,
+                 last_activity_at = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(timestamp, timestamp, current.initiative_id);
+      }
+      this.writeEvent("decision", id, "decision.resolved", input.actor, {
+        outcome: input.outcome,
+        resolved_via: input.resolved_via,
+      });
+      return this.getDecision(id);
+    })();
+  }
+
+  getNotification(id: string): Notification {
+    const row = this.db.prepare("SELECT * FROM notifications WHERE id = ?").get(id) as
+      | Notification
+      | undefined;
+    if (!row) throw new StoreError("not_found", `Notification ${id} was not found`);
+    return row;
+  }
+
+  updateNotification(id: string, input: UpdateNotificationInput): Notification {
+    const current = this.getNotification(id);
+    if (["resolved", "suppressed"].includes(current.status)) {
+      throw new StoreError("conflict", `Notification ${id} cannot be changed from ${current.status}`);
+    }
+    if (input.action === "snooze" && !input.snoozed_until) {
+      throw new StoreError("invalid_request", "snoozed_until is required for snooze");
+    }
+
+    const status = input.action === "archive" ? "archived" : input.action === "snooze" ? "snoozed" : "read";
+    const timestamp = now();
+    this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE notifications SET status = ?, snoozed_until = ?, updated_at = ? WHERE id = ?")
+        .run(status, input.action === "snooze" ? input.snoozed_until : null, timestamp, id);
+      this.writeEvent("notification", id, `notification.${input.action}`, input.actor, {
+        snoozed_until: input.snoozed_until ?? null,
+      });
+    })();
+    return this.getNotification(id);
+  }
+
+  listInbox(): InboxItem[] {
+    const rows = this.db
+      .prepare(
+        `SELECT n.id AS notification_id, n.submission_id
+         FROM notifications n
+         JOIN submissions s ON s.id = n.submission_id
+         LEFT JOIN decisions d ON d.submission_id = s.id
+         WHERE n.status IN ('active', 'read')
+            OR (n.status = 'snoozed' AND n.snoozed_until <= ?)
+         ORDER BY
+           CASE WHEN s.attention_policy = 'interrupt' THEN 0
+                WHEN d.status IN ('open', 'seen') THEN 1
+                ELSE 2 END,
+           n.created_at DESC`,
+      )
+      .all(now()) as Array<{ notification_id: string; submission_id: string }>;
+
+    return rows.map((row) => {
+      const notification = this.getNotification(row.notification_id);
+      const submission = this.getSubmission(row.submission_id);
+      const decisionRow = this.db
+        .prepare("SELECT * FROM decisions WHERE submission_id = ?")
+        .get(submission.id) as DecisionRow | undefined;
+      return {
+        notification,
+        submission,
+        decision: decisionRow ? this.mapDecision(decisionRow) : null,
+        initiative: submission.initiative_id ? this.getInitiative(submission.initiative_id) : null,
+      };
+    });
+  }
+
+  getWorkboard(): Workboard {
+    const initiatives = this.listInitiatives();
+    return {
+      active: initiatives.filter((item) => item.status === "active"),
+      waiting_for_jim: initiatives.filter((item) => item.status === "waiting_for_jim"),
+      waiting_for_agent: initiatives.filter((item) => item.status === "waiting_for_agent"),
+      paused_or_done: initiatives.filter((item) =>
+        ["paused", "completed", "cancelled"].includes(item.status),
+      ),
+    };
+  }
+
+  listEvents(entityType?: string, entityId?: string): AuditEvent[] {
+    let rows: EventRow[];
+    if (entityType && entityId) {
+      rows = this.db
+        .prepare(
+          "SELECT * FROM audit_events WHERE entity_type = ? AND entity_id = ? ORDER BY created_at ASC",
+        )
+        .all(entityType, entityId) as EventRow[];
+    } else {
+      rows = this.db.prepare("SELECT * FROM audit_events ORDER BY created_at DESC").all() as EventRow[];
+    }
+    return rows.map((row) => ({
+      ...row,
+      payload: row.payload_json ? (JSON.parse(row.payload_json) as Record<string, unknown>) : null,
+    }));
+  }
+
+  private mapDecision(row: DecisionRow): Decision {
+    const { options_json, ...decision } = row;
+    return {
+      ...decision,
+      options: options_json ? (JSON.parse(options_json) as string[]) : null,
+    };
+  }
+
+  private writeEvent(
+    entityType: string,
+    entityId: string,
+    eventType: string,
+    actor: ActorContext,
+    payload: Record<string, unknown> | null,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO audit_events
+         (id, entity_type, entity_id, event_type, actor_type, actor_name, source, runtime,
+          agent, session_id, payload_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        entityType,
+        entityId,
+        eventType,
+        actor.actor_type,
+        actor.actor_name,
+        actor.source ?? null,
+        actor.runtime ?? null,
+        actor.agent ?? null,
+        actor.session_id ?? null,
+        payload ? JSON.stringify(payload) : null,
+        now(),
+      );
+  }
+
+  private idempotencyHash(input: unknown): string {
+    return createHash("sha256").update(stableSerialize(input)).digest("hex");
+  }
+
+  private readIdempotent<T>(
+    key: string | undefined,
+    operation: string,
+    input: unknown,
+  ): T | null {
+    if (!key) return null;
+    const row = this.db
+      .prepare("SELECT operation, request_hash, response_json FROM idempotency_keys WHERE key = ?")
+      .get(key) as IdempotencyRow | undefined;
+    if (!row) return null;
+    if (row.operation !== operation || row.request_hash !== this.idempotencyHash(input)) {
+      throw new StoreError("conflict", `Idempotency key ${key} was already used for another request`);
+    }
+    return JSON.parse(row.response_json) as T;
+  }
+
+  private writeIdempotent(
+    key: string | undefined,
+    operation: string,
+    input: unknown,
+    response: unknown,
+  ): void {
+    if (!key) return;
+    this.db
+      .prepare(
+        `INSERT INTO idempotency_keys(key, operation, request_hash, response_json, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(key, operation, this.idempotencyHash(input), JSON.stringify(response), now());
+  }
+}

@@ -1,0 +1,30 @@
+services:
+  gateway:
+    build:
+      context: .
+    image: threadline:local
+    init: true
+    restart: unless-stopped
+    environment:
+      THREADLINE_TOKEN: ${THREADLINE_TOKEN:?Set THREADLINE_TOKEN in .env or the shell}
+      THREADLINE_HOST: 0.0.0.0
+      THREADLINE_PORT: 3000
+      THREADLINE_DATABASE: /data/threadline.sqlite
+      THREADLINE_CORS_ORIGIN: ${THREADLINE_CORS_ORIGIN:-}
+    ports:
+      - "${THREADLINE_HTTP_PORT:-3000}:3000"
+    volumes:
+      - threadline-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  threadline-data:

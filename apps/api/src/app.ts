@@ -1,0 +1,212 @@
+import { timingSafeEqual } from "node:crypto";
+import cors from "@fastify/cors";
+import {
+  CreateInitiativeInputSchema,
+  CreateSubmissionInputSchema,
+  ResolveDecisionInputSchema,
+  UpdateInitiativeInputSchema,
+  UpdateNotificationInputSchema,
+  type CreateInitiativeInput,
+  type CreateSubmissionInput,
+  type InitiativeStatus,
+  type ResolveDecisionInput,
+  type UpdateInitiativeInput,
+  type UpdateNotificationInput,
+} from "@threadline/protocol";
+import { StoreError, ThreadlineStore } from "@threadline/store";
+import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
+import { Type } from "@sinclair/typebox";
+
+export interface AppOptions {
+  store: ThreadlineStore;
+  token: string;
+  logger?: boolean;
+  corsOrigin?: string;
+}
+
+const IdParamsSchema = Type.Object({ id: Type.String({ minLength: 1 }) });
+const InitiativeQuerySchema = Type.Object({
+  status: Type.Optional(Type.String()),
+});
+const SubmissionQuerySchema = Type.Object({
+  initiative_id: Type.Optional(Type.String()),
+});
+const DecisionQuerySchema = Type.Object({
+  status: Type.Optional(Type.String()),
+});
+const EventQuerySchema = Type.Object({
+  entity_type: Type.Optional(Type.String()),
+  entity_id: Type.Optional(Type.String()),
+});
+
+function idempotencyKey(headers: Record<string, unknown>): string | undefined {
+  const value = headers["idempotency-key"];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function tokenMatches(expected: string, supplied: string): boolean {
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(supplied);
+  return (
+    expectedBuffer.length === suppliedBuffer.length &&
+    timingSafeEqual(expectedBuffer, suppliedBuffer)
+  );
+}
+
+export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
+  const app = Fastify({ logger: options.logger ?? false });
+
+  await app.register(cors, {
+    origin: options.corsOrigin ?? false,
+  });
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (!request.url.startsWith("/api/v1")) return;
+    const authorization = request.headers.authorization;
+    const supplied = authorization?.startsWith("Bearer ")
+      ? authorization.slice("Bearer ".length)
+      : "";
+    if (!supplied || !tokenMatches(options.token, supplied)) {
+      return reply.code(401).send({
+        code: "unauthorized",
+        message: "A valid Bearer token is required",
+      });
+    }
+  });
+
+  app.setErrorHandler((unknownError, _request, reply) => {
+    if (unknownError instanceof StoreError) {
+      const status =
+        unknownError.code === "not_found" ? 404 : unknownError.code === "conflict" ? 409 : 400;
+      return reply.code(status).send({ code: unknownError.code, message: unknownError.message });
+    }
+    const error = unknownError as FastifyError;
+    if (error.validation) {
+      return reply.code(400).send({
+        code: "validation_error",
+        message: "Request validation failed",
+        details: error.validation,
+      });
+    }
+    app.log.error(error);
+    return reply.code(error.statusCode ?? 500).send({
+      code: "internal_error",
+      message: error.statusCode && error.statusCode < 500 ? error.message : "Internal server error",
+    });
+  });
+
+  app.get("/health", async () => ({ status: "ok" }));
+
+  app.get("/api/v1/inbox", async () => options.store.listInbox());
+  app.get("/api/v1/workboard", async () => options.store.getWorkboard());
+
+  app.post(
+    "/api/v1/initiatives",
+    { schema: { body: CreateInitiativeInputSchema } },
+    async (request, reply) => {
+      const initiative = options.store.createInitiative(
+        request.body as CreateInitiativeInput,
+        idempotencyKey(request.headers),
+      );
+      return reply.code(201).send(initiative);
+    },
+  );
+
+  app.get(
+    "/api/v1/initiatives",
+    { schema: { querystring: InitiativeQuerySchema } },
+    async (request) => {
+      const query = request.query as { status?: InitiativeStatus };
+      return options.store.listInitiatives(query.status);
+    },
+  );
+
+  app.get(
+    "/api/v1/initiatives/:id",
+    { schema: { params: IdParamsSchema } },
+    async (request) => options.store.getInitiative((request.params as { id: string }).id),
+  );
+
+  app.patch(
+    "/api/v1/initiatives/:id",
+    { schema: { params: IdParamsSchema, body: UpdateInitiativeInputSchema } },
+    async (request) =>
+      options.store.updateInitiative(
+        (request.params as { id: string }).id,
+        request.body as UpdateInitiativeInput,
+      ),
+  );
+
+  app.post(
+    "/api/v1/submissions",
+    { schema: { body: CreateSubmissionInputSchema } },
+    async (request, reply) => {
+      const result = options.store.createSubmission(
+        request.body as CreateSubmissionInput,
+        idempotencyKey(request.headers),
+      );
+      return reply.code(201).send(result);
+    },
+  );
+
+  app.get(
+    "/api/v1/submissions",
+    { schema: { querystring: SubmissionQuerySchema } },
+    async (request) => {
+      const query = request.query as { initiative_id?: string };
+      return options.store.listSubmissions(query.initiative_id);
+    },
+  );
+
+  app.get(
+    "/api/v1/submissions/:id",
+    { schema: { params: IdParamsSchema } },
+    async (request) => options.store.getSubmission((request.params as { id: string }).id),
+  );
+
+  app.get(
+    "/api/v1/decisions",
+    { schema: { querystring: DecisionQuerySchema } },
+    async (request) => {
+      const query = request.query as { status?: string };
+      return options.store.listDecisions(query.status);
+    },
+  );
+
+  app.get(
+    "/api/v1/decisions/:id",
+    { schema: { params: IdParamsSchema } },
+    async (request) => options.store.getDecision((request.params as { id: string }).id),
+  );
+
+  app.post(
+    "/api/v1/decisions/:id/resolve",
+    { schema: { params: IdParamsSchema, body: ResolveDecisionInputSchema } },
+    async (request) =>
+      options.store.resolveDecision(
+        (request.params as { id: string }).id,
+        request.body as ResolveDecisionInput,
+      ),
+  );
+
+  app.patch(
+    "/api/v1/notifications/:id",
+    { schema: { params: IdParamsSchema, body: UpdateNotificationInputSchema } },
+    async (request) =>
+      options.store.updateNotification(
+        (request.params as { id: string }).id,
+        request.body as UpdateNotificationInput,
+      ),
+  );
+
+  app.get(
+    "/api/v1/events",
+    { schema: { querystring: EventQuerySchema } },
+    async (request) => {
+      const query = request.query as { entity_type?: string; entity_id?: string };
+      return options.store.listEvents(query.entity_type, query.entity_id);
+    },
+  );
+
+  return app;
+}

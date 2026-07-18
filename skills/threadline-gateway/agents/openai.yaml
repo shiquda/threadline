@@ -1,0 +1,4 @@
+interface:
+  display_name: "Threadline Gateway"
+  short_description: "Submit work and close decisions through Threadline"
+  default_prompt: "Use $threadline-gateway to submit this result or close its pending decision."
