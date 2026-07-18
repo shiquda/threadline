@@ -96,5 +96,5 @@ export class ThreadlineApi {
 }
 
 export function humanActor() {
-  return { actor_type: "human" as const, actor_name: "Jim", source: "web", runtime: null, agent: null, session_id: null };
+  return { actor_type: "human" as const, actor_name: "web-user", source: "web", runtime: null, agent: null, session_id: null };
 }

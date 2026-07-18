@@ -48,6 +48,10 @@ function formatDate(value: string | null): string {
 
 function titleCase(value: string): string { return value.replaceAll("_", " "); }
 
+function displayStatus(value: string): string {
+  return value === "waiting_for_jim" ? "Waiting for you" : titleCase(value);
+}
+
 function badgeClass(value: string): string {
   if (["high", "interrupt", "alert"].includes(value)) return "urgent";
   if (["medium", "waiting_for_jim", "open"].includes(value)) return "warn";
@@ -95,7 +99,7 @@ function App() {
       <div className="topbar-actions">
         <button className="btn btn-secondary btn-sm desktop-only" onClick={() => setShowNewInitiative(true)}><Plus size={16} />New initiative</button>
         <button className="btn-icon" title="Gateway connection" onClick={() => setShowConnection(true)}><Settings2 /></button>
-        <div className="user-chip"><span className="avatar">J</span>Jim</div>
+        <div className="user-chip"><span className="avatar">Y</span>You</div>
       </div>
     </header>
     <main className="main">
@@ -165,11 +169,11 @@ function IconAction({ label, children, ...props }: { label: string; children: Re
 
 function WorkboardPage({ api }: { api: ThreadlineApi }) {
   const data = useLoad(() => api.workboard(), [api]);
-  const lanes: Array<[string, Initiative[]]> = data.value ? [["In progress", data.value.active], ["Waiting for Jim", data.value.waiting_for_jim], ["Waiting for Agent", data.value.waiting_for_agent], ["Paused / done", data.value.paused_or_done]] : [];
+  const lanes: Array<[string, Initiative[]]> = data.value ? [["In progress", data.value.active], ["Waiting for you", data.value.waiting_for_jim], ["Waiting for Agent", data.value.waiting_for_agent], ["Paused / done", data.value.paused_or_done]] : [];
   return <PageHeader title="Workboard" subtitle="Running initiatives grouped by who they are waiting on.">{data.loading ? <StateBox title="Loading Workboard">Fetching current initiative states.</StateBox> : data.error ? <StateBox title="Could not load Workboard" retry={data.reload}>{data.error}</StateBox> : <div className="board">{lanes.map(([label, initiatives]) => <section className="lane" key={label}><header className="lane-header"><h2>{label}</h2><span>{initiatives.length}</span></header><div className="lane-body">{initiatives.length ? initiatives.map((initiative) => <InitiativeCard initiative={initiative} key={initiative.id} />) : <div className="lane-empty">No initiatives</div>}</div></section>)}</div>}</PageHeader>;
 }
 
-function InitiativeCard({ initiative }: { initiative: Initiative }) { return <a className="work-card" href={`#initiative/${initiative.id}`}><h3>{initiative.title}</h3><p><span>Intent</span>{initiative.intent}</p><p><span>Next</span>{initiative.next_step ?? "No next step recorded"}</p><footer><Badge tone={initiative.status}>{titleCase(initiative.status)}</Badge><span>{formatDate(initiative.last_activity_at)}</span></footer></a>; }
+function InitiativeCard({ initiative }: { initiative: Initiative }) { return <a className="work-card" href={`#initiative/${initiative.id}`}><h3>{initiative.title}</h3><p><span>Intent</span>{initiative.intent}</p><p><span>Next</span>{initiative.next_step ?? "No next step recorded"}</p><footer><Badge tone={initiative.status}>{displayStatus(initiative.status)}</Badge><span>{formatDate(initiative.last_activity_at)}</span></footer></a>; }
 
 function DecisionsPage({ api }: { api: ThreadlineApi }) {
   const data = useLoad(() => Promise.all([api.decisions(), api.initiatives()]), [api]);
@@ -188,7 +192,7 @@ function InitiativeDetail({ api, id }: { api: ThreadlineApi; id: string }) {
   const [initiative, submissions, allDecisions, events] = data.value;
   const decisions = allDecisions.filter((decision) => decision.initiative_id === id);
   const updateStatus = async (status: InitiativeStatus) => { setSaving(true); try { await api.updateInitiative(id, { status }); data.reload(); } finally { setSaving(false); } };
-  return <PageHeader title={initiative.title} subtitle={`Initiative · ${titleCase(initiative.status)}`} action={<a className="btn btn-secondary btn-sm" href="#workboard">Back to Workboard</a>}><div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title="Intent"><p className="detail-copy">{initiative.intent}</p></DetailSection><DetailSection title="Next step"><p className="detail-copy">{initiative.next_step ?? "No next step recorded."}</p></DetailSection><DetailSection title="Submissions">{submissions.length ? <div className="linked-list">{submissions.map((submission) => <SubmissionRow key={submission.id} submission={submission} />)}</div> : <p className="text-muted">No submissions are linked yet.</p>}</DetailSection><DetailSection title="Decisions">{decisions.length ? <div className="linked-list">{decisions.map((decision) => <a href={`#decision/${decision.id}`} className="linked-row" key={decision.id}><div><strong>{decision.question}</strong><span>{decision.resolution ?? "Awaiting a decision"}</span></div><Badge tone={decision.status}>{decision.status}</Badge></a>)}</div> : <p className="text-muted">No decisions are linked yet.</p>}</DetailSection><DetailSection title="Activity"><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>Properties</h2></div><div className="panel-body"><div className="field"><label htmlFor="initiative-status">Status</label><select id="initiative-status" value={initiative.status} disabled={saving} onChange={(event) => void updateStatus(event.target.value as InitiativeStatus)}>{["active", "waiting_for_jim", "waiting_for_agent", "paused", "completed", "cancelled"].map((value) => <option value={value} key={value}>{titleCase(value)}</option>)}</select></div><Properties rows={[["ID", initiative.id], ["Created by", initiative.created_by], ["Last activity", formatDate(initiative.last_activity_at)], ["Created", formatDate(initiative.created_at)]]} /></div></aside></div></PageHeader>;
+  return <PageHeader title={initiative.title} subtitle={`Initiative · ${displayStatus(initiative.status)}`} action={<a className="btn btn-secondary btn-sm" href="#workboard">Back to Workboard</a>}><div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title="Intent"><p className="detail-copy">{initiative.intent}</p></DetailSection><DetailSection title="Next step"><p className="detail-copy">{initiative.next_step ?? "No next step recorded."}</p></DetailSection><DetailSection title="Submissions">{submissions.length ? <div className="linked-list">{submissions.map((submission) => <SubmissionRow key={submission.id} submission={submission} />)}</div> : <p className="text-muted">No submissions are linked yet.</p>}</DetailSection><DetailSection title="Decisions">{decisions.length ? <div className="linked-list">{decisions.map((decision) => <a href={`#decision/${decision.id}`} className="linked-row" key={decision.id}><div><strong>{decision.question}</strong><span>{decision.resolution ?? "Awaiting a decision"}</span></div><Badge tone={decision.status}>{decision.status}</Badge></a>)}</div> : <p className="text-muted">No decisions are linked yet.</p>}</DetailSection><DetailSection title="Activity"><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>Properties</h2></div><div className="panel-body"><div className="field"><label htmlFor="initiative-status">Status</label><select id="initiative-status" value={initiative.status} disabled={saving} onChange={(event) => void updateStatus(event.target.value as InitiativeStatus)}>{["active", "waiting_for_jim", "waiting_for_agent", "paused", "completed", "cancelled"].map((value) => <option value={value} key={value}>{displayStatus(value)}</option>)}</select></div><Properties rows={[["ID", initiative.id], ["Created by", initiative.created_by], ["Last activity", formatDate(initiative.last_activity_at)], ["Created", formatDate(initiative.created_at)]]} /></div></aside></div></PageHeader>;
 }
 
 function DecisionDetail({ api, id }: { api: ThreadlineApi; id: string }) {
