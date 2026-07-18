@@ -6,6 +6,7 @@ import type {
   CreateInitiativeInput,
   CreateSubmissionInput,
   Decision,
+  DecisionStatus,
   InboxItem,
   Initiative,
   InitiativeStatus,
@@ -259,6 +260,12 @@ export class ThreadlineStore {
         .run(notification);
 
       if (submission.initiative_id) {
+        const initiativeBefore = this.getInitiative(submission.initiative_id);
+        const initiativeStatus =
+          submission.kind === "decision_request" &&
+          ["active", "waiting_for_agent"].includes(initiativeBefore.status)
+            ? "waiting_for_jim"
+            : initiativeBefore.status;
         this.db
           .prepare(
             `UPDATE initiatives
@@ -271,6 +278,15 @@ export class ThreadlineStore {
              WHERE id = ?`,
           )
           .run(submission.kind, timestamp, timestamp, submission.initiative_id);
+        if (initiativeStatus !== initiativeBefore.status) {
+          this.writeEvent(
+            "initiative",
+            submission.initiative_id,
+            "initiative.waiting_for_jim",
+            input.actor,
+            { previous_status: initiativeBefore.status, status: initiativeStatus },
+          );
+        }
       }
 
       this.writeEvent("submission", submission.id, "submission.created", input.actor, {
@@ -335,7 +351,23 @@ export class ThreadlineStore {
     return this.mapDecision(row);
   }
 
-  listDecisions(status?: string): Decision[] {
+  listDecisions(status?: DecisionStatus, initiativeId?: string): Decision[] {
+    if (status && initiativeId) {
+      return (
+        this.db
+          .prepare(
+            "SELECT * FROM decisions WHERE status = ? AND initiative_id = ? ORDER BY created_at DESC",
+          )
+          .all(status, initiativeId) as DecisionRow[]
+      ).map((row) => this.mapDecision(row));
+    }
+    if (initiativeId) {
+      return (
+        this.db
+          .prepare("SELECT * FROM decisions WHERE initiative_id = ? ORDER BY created_at DESC")
+          .all(initiativeId) as DecisionRow[]
+      ).map((row) => this.mapDecision(row));
+    }
     const rows = status
       ? (this.db
           .prepare("SELECT * FROM decisions WHERE status = ? ORDER BY created_at DESC")
@@ -371,6 +403,12 @@ export class ThreadlineStore {
           timestamp,
           id,
         );
+      const closingNotifications = this.db
+        .prepare(
+          `SELECT id FROM notifications
+           WHERE submission_id = ? AND status IN ('active', 'read', 'snoozed')`,
+        )
+        .all(current.submission_id) as Array<{ id: string }>;
       this.db
         .prepare(
           `UPDATE notifications
@@ -378,7 +416,17 @@ export class ThreadlineStore {
            WHERE submission_id = ? AND status IN ('active', 'read', 'snoozed')`,
         )
         .run(timestamp, current.submission_id);
+      for (const notification of closingNotifications) {
+        this.writeEvent(
+          "notification",
+          notification.id,
+          "notification.resolved",
+          input.actor,
+          { decision_id: id },
+        );
+      }
       if (current.initiative_id) {
+        const initiativeBefore = this.getInitiative(current.initiative_id);
         this.db
           .prepare(
             `UPDATE initiatives
@@ -387,6 +435,15 @@ export class ThreadlineStore {
              WHERE id = ?`,
           )
           .run(timestamp, timestamp, current.initiative_id);
+        if (initiativeBefore.status === "waiting_for_jim") {
+          this.writeEvent(
+            "initiative",
+            current.initiative_id,
+            "initiative.waiting_for_agent",
+            input.actor,
+            { previous_status: "waiting_for_jim", status: "waiting_for_agent" },
+          );
+        }
       }
       this.writeEvent("decision", id, "decision.resolved", input.actor, {
         outcome: input.outcome,

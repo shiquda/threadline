@@ -47,6 +47,21 @@ During development the same command is available through:
 npm run dev:cli -- --json status
 ```
 
+## Install for an Agent environment
+
+Build the repository once and link the CLI onto the host PATH:
+
+```bash
+npm ci
+npm run build
+npm link --workspace @threadline/cli
+threadline --version
+```
+
+Install `skills/threadline-gateway/` into the Agent environment's standard Skills directory. For Codex, copy that folder to `$CODEX_HOME/skills/threadline-gateway/` (or `~/.codex/skills/threadline-gateway/` when `CODEX_HOME` is unset). Other Agent Skills-compatible environments can install the same folder without rewriting its instructions.
+
+Configure `THREADLINE_URL`, `THREADLINE_TOKEN`, `THREADLINE_RUNTIME`, `THREADLINE_AGENT`, and `THREADLINE_SESSION_ID` in the Agent environment. The Skill itself does not run a daemon or poll the Gateway.
+
 ## Docker deployment
 
 Create a local environment file from `.env.example`, replace the placeholder Token, then run:

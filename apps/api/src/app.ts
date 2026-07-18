@@ -3,11 +3,14 @@ import cors from "@fastify/cors";
 import {
   CreateInitiativeInputSchema,
   CreateSubmissionInputSchema,
+  DecisionStatusSchema,
+  InitiativeStatusSchema,
   ResolveDecisionInputSchema,
   UpdateInitiativeInputSchema,
   UpdateNotificationInputSchema,
   type CreateInitiativeInput,
   type CreateSubmissionInput,
+  type DecisionStatus,
   type InitiativeStatus,
   type ResolveDecisionInput,
   type UpdateInitiativeInput,
@@ -26,13 +29,14 @@ export interface AppOptions {
 
 const IdParamsSchema = Type.Object({ id: Type.String({ minLength: 1 }) });
 const InitiativeQuerySchema = Type.Object({
-  status: Type.Optional(Type.String()),
+  status: Type.Optional(InitiativeStatusSchema),
 });
 const SubmissionQuerySchema = Type.Object({
   initiative_id: Type.Optional(Type.String()),
 });
 const DecisionQuerySchema = Type.Object({
-  status: Type.Optional(Type.String()),
+  status: Type.Optional(DecisionStatusSchema),
+  initiative_id: Type.Optional(Type.String()),
 });
 const EventQuerySchema = Type.Object({
   entity_type: Type.Optional(Type.String()),
@@ -168,8 +172,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     "/api/v1/decisions",
     { schema: { querystring: DecisionQuerySchema } },
     async (request) => {
-      const query = request.query as { status?: string };
-      return options.store.listDecisions(query.status);
+      const query = request.query as { status?: DecisionStatus; initiative_id?: string };
+      return options.store.listDecisions(query.status, query.initiative_id);
     },
   );
 
