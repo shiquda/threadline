@@ -164,6 +164,18 @@ const migrations = [
         ON submissions(host, tool, session_id, created_at DESC);
     `,
   },
+  {
+    version: 5,
+    sql: `
+      UPDATE submissions
+      SET session_id = NULL
+      WHERE session_id IS NOT NULL AND trim(session_id) = '';
+
+      UPDATE audit_events
+      SET session_id = NULL
+      WHERE session_id IS NOT NULL AND trim(session_id) = '';
+    `,
+  },
 ] as const;
 
 export function migrate(db: Database.Database): void {

@@ -16,6 +16,18 @@ THREADLINE_SESSION_ID=<current session id>
 THREADLINE_INITIATIVE=<initiative id>
 ```
 
+`THREADLINE_SESSION_ID` is optional. Use an exact native harness ID when one is available; otherwise leave it unset and the submission is grouped into that Host/Tool's unscoped timeline. Do not invent a replacement ID. Optional adapters can supply native IDs automatically:
+
+```bash
+threadline integration install codex
+threadline integration install claude-code
+threadline integration install opencode
+threadline integration install openclaw
+threadline integration status
+```
+
+`threadline integration install` and `remove` support `--dry-run`; adapters only manage their own hook or plugin file and never carry the Threadline token.
+
 Local persistent configuration is also available:
 
 ```bash

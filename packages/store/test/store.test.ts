@@ -174,6 +174,21 @@ describe("ThreadlineStore core initiative projection", () => {
 });
 
 describe("ThreadlineStore execution identity", () => {
+  it("normalizes blank session IDs to null for submissions and audit events", () => {
+    const store = new ThreadlineStore(":memory:");
+    const result = store.createSubmission({
+      kind: "delivery",
+      title: "Blank session",
+      summary: "Stored without a sentinel session value.",
+      attention_policy: "record_only",
+      actor: { actor_type: "agent", actor_name: "test-agent", session_id: "   " },
+    });
+
+    expect(result.submission.session_id).toBeNull();
+    expect(store.listEvents("submission", result.submission.id)[0]?.session_id).toBeNull();
+    store.close();
+  });
+
   it("backfills tool from legacy runtime without inventing a host", async () => {
     const directory = await mkdtemp(join(tmpdir(), "threadline-migration-"));
     const filename = join(directory, "legacy.sqlite");
@@ -183,9 +198,9 @@ describe("ThreadlineStore execution identity", () => {
       INSERT INTO schema_migrations VALUES (1, '2026-07-19T00:00:00.000Z');
       INSERT INTO schema_migrations VALUES (2, '2026-07-19T00:00:00.000Z');
       CREATE TABLE submissions (runtime TEXT, session_id TEXT, created_at TEXT);
-      CREATE TABLE audit_events (runtime TEXT);
-      INSERT INTO submissions(runtime) VALUES ('codex');
-      INSERT INTO audit_events VALUES ('claude-code');
+      CREATE TABLE audit_events (runtime TEXT, session_id TEXT);
+      INSERT INTO submissions(runtime, session_id) VALUES ('codex', '   ');
+      INSERT INTO audit_events VALUES ('claude-code', '');
     `);
     database.close();
 
@@ -193,8 +208,8 @@ describe("ThreadlineStore execution identity", () => {
     store.close();
 
     const migrated = new Database(filename, { readonly: true });
-    expect(migrated.prepare("SELECT host, tool FROM submissions").get()).toEqual({ host: null, tool: "codex" });
-    expect(migrated.prepare("SELECT host, tool FROM audit_events").get()).toEqual({ host: null, tool: "claude-code" });
+    expect(migrated.prepare("SELECT host, tool, session_id FROM submissions").get()).toEqual({ host: null, tool: "codex", session_id: null });
+    expect(migrated.prepare("SELECT host, tool, session_id FROM audit_events").get()).toEqual({ host: null, tool: "claude-code", session_id: null });
     migrated.close();
     await rm(directory, { recursive: true, force: true });
   });

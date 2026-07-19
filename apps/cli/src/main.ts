@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { appendFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import type { ActorContext, AttentionPolicy, SubmissionKind, Task } from "@threadline/protocol";
 import { Command, Option } from "commander";
@@ -12,6 +13,14 @@ import {
   readConfig,
   writeConfig,
 } from "./config.js";
+import {
+  environmentLines,
+  harnesses,
+  installIntegration,
+  integrationStatus,
+  isHarness,
+  removeIntegration,
+} from "./integrations.js";
 
 interface GlobalOptions {
   json?: boolean;
@@ -85,6 +94,7 @@ function output(value: unknown): void {
 }
 
 function detectRuntime(): string | undefined {
+  if (process.env.CODEX_THREAD_ID || process.env.CODEX_SESSION_ID) return "codex";
   if (process.env.CODEX_HOME) return "codex";
   if (process.env.CLAUDE_CODE || process.env.CLAUDE_PROJECT_DIR) return "claude-code";
   if (process.env.CURSOR_TRACE_ID) return "cursor";
@@ -93,7 +103,8 @@ function detectRuntime(): string | undefined {
 
 function firstDefined<T>(...values: Array<T | undefined>): T | undefined {
   for (const value of values) {
-    if (value !== undefined && value !== "") return value;
+    if (typeof value === "string" && value.trim().length === 0) continue;
+    if (value !== undefined) return value;
   }
   return undefined;
 }
@@ -103,12 +114,20 @@ async function resolveContext(): Promise<ResolvedContext> {
   const config = await readConfig();
   const persisted = config.context ?? {};
   const runtime = firstDefined(options.runtime, process.env.THREADLINE_RUNTIME, persisted.runtime, detectRuntime());
-  const tool = firstDefined(options.tool, process.env.THREADLINE_TOOL, persisted.tool, runtime);
+  const nativeCodexSession = firstDefined(process.env.CODEX_THREAD_ID, process.env.CODEX_SESSION_ID);
+  const tool = firstDefined(
+    options.tool,
+    process.env.THREADLINE_TOOL,
+    nativeCodexSession ? "codex" : undefined,
+    persisted.tool,
+    runtime,
+  );
   const host = firstDefined(options.host, process.env.THREADLINE_ACTOR_HOST, persisted.host, hostname());
   const agent = firstDefined(options.agent, process.env.THREADLINE_AGENT, persisted.agent);
   const sessionId = firstDefined(
     options.session,
     process.env.THREADLINE_SESSION_ID,
+    process.env.CODEX_THREAD_ID,
     process.env.CODEX_SESSION_ID,
     process.env.CLAUDE_SESSION_ID,
     persisted.sessionId,
@@ -426,6 +445,47 @@ program
       await writeConfig(withoutContext);
     }
     output({ path: configPath(), context: Object.keys(compact).length > 0 ? compact : null });
+  });
+
+const integration = program.command("integration").description("install optional native harness session adapters");
+integration
+  .command("install <harness>")
+  .option("--root <path>", "override the harness home directory")
+  .action(async (harness: string, options: { root?: string }) => {
+    if (!isHarness(harness)) throw new Error(`Harness must be one of: ${harnesses.join(", ")}.`);
+    output(await installIntegration(harness, options.root, Boolean(globalOptions().dryRun)));
+  });
+integration
+  .command("remove <harness>")
+  .option("--root <path>", "override the harness home directory")
+  .action(async (harness: string, options: { root?: string }) => {
+    if (!isHarness(harness)) throw new Error(`Harness must be one of: ${harnesses.join(", ")}.`);
+    output(await removeIntegration(harness, options.root, Boolean(globalOptions().dryRun)));
+  });
+integration
+  .command("status [harness]")
+  .option("--root <path>", "override the harness home directory")
+  .action(async (harness: string | undefined, options: { root?: string }) => {
+    if (harness) {
+      if (!isHarness(harness)) throw new Error(`Harness must be one of: ${harnesses.join(", ")}.`);
+      output(await integrationStatus(harness, options.root));
+      return;
+    }
+    output(await Promise.all(harnesses.map((item) => integrationStatus(item, options.root))));
+  });
+integration
+  .command("env <harness>")
+  .action(async (harness: string) => {
+    if (!isHarness(harness)) return;
+    try {
+      let raw = "";
+      for await (const chunk of process.stdin) raw += String(chunk);
+      const lines = environmentLines(harness, raw.trim() ? JSON.parse(raw) : null);
+      const envFile = process.env.CLAUDE_ENV_FILE;
+      if (lines.length && envFile) await appendFile(envFile, `${lines.join("\n")}\n`, "utf8");
+    } catch {
+      // This command is invoked from a harness lifecycle hook. A malformed hook payload must not block startup.
+    }
   });
 
 program.command("status").action(async () => output(await request("/health", {}, false)));

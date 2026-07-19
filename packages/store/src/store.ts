@@ -65,6 +65,11 @@ function sourceFor(actor: ActorContext): string {
   return actor.source ?? actor.runtime ?? actor.actor_name;
 }
 
+export function normalizeSessionId(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  return value.trim().length > 0 ? value : null;
+}
+
 function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
@@ -319,7 +324,7 @@ export class ThreadlineStore {
         source: sourceFor(input.actor),
         runtime: input.actor.runtime ?? null,
         agent: input.actor.agent ?? null,
-        session_id: input.actor.session_id ?? null,
+        session_id: normalizeSessionId(input.actor.session_id),
         observed_at: input.observed ? timestamp : null,
         created_at: timestamp,
         created_by: input.actor.actor_name,
@@ -872,7 +877,7 @@ export class ThreadlineStore {
         actor.source ?? null,
         actor.runtime ?? null,
         actor.agent ?? null,
-        actor.session_id ?? null,
+        normalizeSessionId(actor.session_id),
         payload ? JSON.stringify(payload) : null,
         now(),
       );

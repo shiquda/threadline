@@ -12,7 +12,7 @@ Read [references/cli.md](references/cli.md) before the first CLI operation or wh
 ## Establish context
 
 1. Confirm the CLI can reach the configured Gateway with `threadline --json status`.
-2. Set accurate `THREADLINE_TOOL` and `THREADLINE_SESSION_ID` values for the current session before any write. The CLI records the local hostname automatically; use `THREADLINE_ACTOR_HOST` only when it needs an explicit override. `THREADLINE_RUNTIME` remains a compatibility fallback for older integrations.
+2. Set accurate `THREADLINE_TOOL` when it is known. Use `THREADLINE_SESSION_ID` only when the harness provides its current native session ID; preserve it exactly. Do not generate, guess, or derive a session ID from time, process IDs, working directories, transcripts, or recent activity. A missing session ID is valid and submits to the Host/Tool `unscoped` timeline. The CLI records the local hostname automatically; use `THREADLINE_ACTOR_HOST` only when it needs an explicit override. `THREADLINE_RUNTIME` remains a compatibility fallback for older integrations.
 3. Reuse an existing Initiative when the work belongs to its durable theme. Create one only for an intentional, continuing body of work that needs shared state across sessions or actors; do not infer one from a single unrelated message.
 4. At a resume or handoff boundary, inspect the Initiative, its Tasks, linked Submissions, open Decisions, and the Workboard before claiming its state or creating duplicate work.
 
@@ -54,7 +54,7 @@ Use Threadline records to preserve the minimum context that another human or Age
 
 - Associate content with the existing initiative using `--initiative` whenever it belongs to that durable work theme.
 - Put the human-readable conclusion in `--summary`; use `--detail` for concise supporting context and `--detail-ref` for an artifact, PR, file, or other durable reference.
-- Preserve host, tool, and session metadata on every write. Do not invent an initiative, owner, blocker, session, or reference when it is unknown.
+- Preserve host, tool, and available native session metadata on every write. Do not invent an initiative, owner, blocker, session, or reference when it is unknown.
 - Use `--observed` when the current user has already seen the result, so the fact remains recorded without creating duplicate attention.
 
 ## Language policy

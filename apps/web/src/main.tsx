@@ -10,11 +10,14 @@ import { formatDate, formatExactDate, humanize, I18nProvider, supportedLocales, 
 import { initiativeRecord, normalizeWorkboard, type InitiativeRecord } from "./workboard.js";
 import {
   groupSubmissionsByIdentity,
+  makeAgentsHostRoute,
   makeAgentsSessionRoute,
-  parseAgentsSessionRoute,
-  selectedSessionRecords,
+  makeAgentsToolRoute,
+  makeAgentsUnscopedRoute,
+  parseAgentsRoute,
+  scopeRecords,
+  sessionLabel,
   UNKNOWN_HOST,
-  UNKNOWN_SESSION,
   UNKNOWN_TOOL,
 } from "./agents.js";
 import "./styles.css";
@@ -31,9 +34,7 @@ function routeFromHash(): Route {
   if (page === "decision" && rest[0]) return { page: "decision", id: rest[0] };
   if (page === "submission" && rest[0]) return { page: "submission", id: rest[0] };
   if (page === "task" && rest[0]) return { page: "task", id: rest[0] };
-  if (page === "agents" && rest.length === 3) {
-    return { page: "agents", id: rest.join("/") };
-  }
+  if (page === "agents") return { page: "agents", ...(rest.length ? { id: rest.join("/") } : {}) };
   if (page && ["inbox", "workboard", "decisions", "agents"].includes(page)) return { page: page as Page };
   return { page: "overview" };
 }
@@ -454,9 +455,9 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
 
   const selected = useMemo(() => {
     if (!route.id) return null;
-    const parsed = parseAgentsSessionRoute(route.id);
+    const parsed = parseAgentsRoute(route.id);
     if (!parsed) return null;
-    const records = selectedSessionRecords(groups, parsed.host, parsed.tool, parsed.session);
+    const records = scopeRecords(groups, parsed);
     if (!records) return null;
     return { ...parsed, records };
   }, [route.id, groups]);
@@ -464,8 +465,10 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
   useEffect(() => {
     if (!selected) return;
     setExpandedHosts((prev) => new Set([...prev, selected.host]));
-    setExpandedTools((prev) => new Set([...prev, toolKey(selected.host, selected.tool)]));
-  }, [selected?.host, selected?.tool, selected?.session]);
+    if (selected.kind !== "host") {
+      setExpandedTools((prev) => new Set([...prev, toolKey(selected.host, selected.tool)]));
+    }
+  }, [selected?.host, selected?.kind, selected && selected.kind !== "host" ? selected.tool : undefined]);
 
   const toggleHost = (host: string) => {
     setExpandedHosts((prev) => {
@@ -486,8 +489,10 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
     });
   };
 
-  const selectSession = (host: string, tool: string, session: string) => {
-    navigate(`#${makeAgentsSessionRoute(host, tool, session)}`);
+  const selectHost = (host: string) => navigate(`#${makeAgentsHostRoute(host)}`);
+  const selectTool = (host: string, tool: string) => navigate(`#${makeAgentsToolRoute(host, tool)}`);
+  const selectSession = (host: string, tool: string, scope: { kind: "native"; id: string } | { kind: "unscoped" }) => {
+    navigate(`#${scope.kind === "native" ? makeAgentsSessionRoute(host, tool, scope.id) : makeAgentsUnscopedRoute(host, tool)}`);
   };
 
   const totalHosts = groups.length;
@@ -504,26 +509,32 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
           <div className="agents-tree" role="tree">
             {groups.map((hostNode) => (
               <div className="agents-host" key={hostNode.host}>
-                <button className={`agents-host-row ${hostNode.host === UNKNOWN_HOST ? "unknown" : ""}`} aria-expanded={isHostExpanded(hostNode.host)} onClick={() => toggleHost(hostNode.host)}>
-                  <ChevronRight size={16} className="chevron" />
-                  <span>{hostNode.host}</span>
+                <div className={`agents-host-row ${hostNode.host === UNKNOWN_HOST ? "unknown" : ""}`}>
+                  <button className="agents-tree-toggle" title={t("Expand host")} aria-label={t("Expand host")} aria-expanded={isHostExpanded(hostNode.host)} onClick={() => toggleHost(hostNode.host)}><ChevronRight size={16} className="chevron" /></button>
+                  <button className="agents-tree-label" onClick={() => selectHost(hostNode.host)}>{hostNode.host}</button>
                   <span className="count"><Badge tone="info">{hostNode.tools.reduce((sum, tool) => sum + tool.sessions.reduce((s, session) => s + session.submissions.length, 0), 0)}</Badge></span>
-                </button>
+                </div>
                 {isHostExpanded(hostNode.host) && (
                   <div className="agents-tool-list" role="group">
                     {hostNode.tools.map((toolNode) => (
                       <div className="agents-tool" key={toolNode.tool}>
-                        <button className={`agents-tool-row ${toolNode.tool === UNKNOWN_TOOL ? "unknown" : ""}`} aria-expanded={isToolExpanded(hostNode.host, toolNode.tool)} onClick={() => toggleTool(hostNode.host, toolNode.tool)}>
-                          <ChevronRight size={16} className="chevron" />
-                          <span>{toolNode.tool}</span>
+                        <div className={`agents-tool-row ${toolNode.tool === UNKNOWN_TOOL ? "unknown" : ""}`}>
+                          <button className="agents-tree-toggle" title={t("Expand tool")} aria-label={t("Expand tool")} aria-expanded={isToolExpanded(hostNode.host, toolNode.tool)} onClick={() => toggleTool(hostNode.host, toolNode.tool)}><ChevronRight size={16} className="chevron" /></button>
+                          <button className="agents-tree-label" onClick={() => selectTool(hostNode.host, toolNode.tool)}>{toolNode.tool}</button>
                           <span className="count"><Badge tone="info">{toolNode.sessions.reduce((sum, session) => sum + session.submissions.length, 0)}</Badge></span>
-                        </button>
+                        </div>
                         {isToolExpanded(hostNode.host, toolNode.tool) && (
                           <div className="agents-session-list" role="group">
                             {toolNode.sessions.map((sessionNode) => {
-                              const isSelected = selected?.host === hostNode.host && selected?.tool === toolNode.tool && selected?.session === sessionNode.session;
-                              return <button key={sessionNode.session} className={`agents-session-row ${isSelected ? "selected" : ""} ${sessionNode.session === UNKNOWN_SESSION ? "unknown" : ""}`} aria-current={isSelected ? "true" : undefined} onClick={() => selectSession(hostNode.host, toolNode.tool, sessionNode.session)}>
-                                <span className="session-label">{sessionNode.session}</span>
+                              const isSelected = Boolean(
+                                selected && selected.kind !== "host" && selected.host === hostNode.host && selected.tool === toolNode.tool && (
+                                  (selected.kind === "session" && sessionNode.scope.kind === "native" && selected.session === sessionNode.scope.id)
+                                  || (selected.kind === "unscoped" && sessionNode.scope.kind === "unscoped")
+                                ),
+                              );
+                              const label = sessionLabel(sessionNode.scope);
+                              return <button key={`${sessionNode.scope.kind}:${label}`} className={`agents-session-row ${isSelected ? "selected" : ""} ${sessionNode.scope.kind === "unscoped" ? "unknown" : ""}`} aria-current={isSelected ? "true" : undefined} onClick={() => selectSession(hostNode.host, toolNode.tool, sessionNode.scope)}>
+                                <span className="session-label" title={label}>{label}</span>
                                 <span className="session-meta">{t("{count} records", { count: sessionNode.submissions.length })}</span>
                               </button>;
                             })}
@@ -538,11 +549,11 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
           </div>
         </section>
         <section className="agents-detail" aria-label={t("Session records")}>
-          {!selected ? <div className="state-box agents-detail-empty"><Network aria-hidden="true" /><div><div className="state-title">{t("No session selected")}</div><p>{t("Select a session to view its records.")}</p></div></div> : <>
+          {!selected ? <div className="state-box agents-detail-empty"><Network aria-hidden="true" /><div><div className="state-title">{t("No timeline selected")}</div><p>{t("Select a host, tool, or session to view its records.")}</p></div></div> : <>
             <div className="agents-session-header">
               <div>
-                <h2>{t("Session records")}</h2>
-                <div className="session-path"><span>{selected.host}</span><span>·</span><span>{selected.tool}</span><span>·</span><CopyValue value={selected.session} /></div>
+                <h2>{selected.kind === "host" ? selected.host : selected.kind === "tool" ? selected.tool : selected.kind === "session" ? selected.session : t("No session recorded")}</h2>
+                <div className="session-path"><span>{t("Host")}: {selected.host}</span>{selected.kind !== "host" && <><span>·</span><span>{t("Tool")}: {selected.tool}</span></>}{selected.kind === "session" && <><span>·</span><CopyValue value={selected.session} /></>}</div>
               </div>
               <Badge tone="info">{t("{count} records", { count: selected.records.length })}</Badge>
             </div>

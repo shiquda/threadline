@@ -4,8 +4,18 @@ export const UNKNOWN_HOST = "Unknown host";
 export const UNKNOWN_TOOL = "Unknown tool";
 export const UNKNOWN_SESSION = "No session recorded";
 
+export type SessionScope =
+  | { kind: "native"; id: string }
+  | { kind: "unscoped" };
+
+export type AgentScope =
+  | { kind: "host"; host: string }
+  | { kind: "tool"; host: string; tool: string }
+  | { kind: "session"; host: string; tool: string; session: string }
+  | { kind: "unscoped"; host: string; tool: string };
+
 export type AgentSession = {
-  session: string;
+  scope: SessionScope;
   submissions: Submission[];
 };
 
@@ -27,65 +37,50 @@ function canonicalTool(submission: Submission): string {
   return submission.tool ?? UNKNOWN_TOOL;
 }
 
-function canonicalSession(submission: Submission): string {
-  return submission.session_id ?? UNKNOWN_SESSION;
+export function sessionScope(submission: Submission): SessionScope {
+  const id = submission.session_id?.trim();
+  return id ? { kind: "native", id: submission.session_id! } : { kind: "unscoped" };
 }
 
-function isUnknown(label: string): boolean {
-  return label === UNKNOWN_HOST || label === UNKNOWN_TOOL || label === UNKNOWN_SESSION;
+export function sessionLabel(scope: SessionScope): string {
+  return scope.kind === "native" ? scope.id : UNKNOWN_SESSION;
+}
+
+function compareSubmission(a: Submission, b: Submission): number {
+  return b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id);
 }
 
 function latestCreatedAt(submissions: Submission[]): string {
-  return submissions
-    .map((submission) => submission.created_at)
-    .sort((a, b) => b.localeCompare(a))[0] ?? "";
+  return submissions[0]?.created_at ?? "";
 }
 
-function compareByKnownThenName(a: string, b: string): number {
-  const aUnknown = isUnknown(a) ? 1 : 0;
-  const bUnknown = isUnknown(b) ? 1 : 0;
-  if (aUnknown !== bUnknown) return aUnknown - bUnknown;
+function compareKnownThenName(a: string, b: string): number {
+  const aUnknown = a === UNKNOWN_HOST || a === UNKNOWN_TOOL;
+  const bUnknown = b === UNKNOWN_HOST || b === UNKNOWN_TOOL;
+  if (aUnknown !== bUnknown) return aUnknown ? 1 : -1;
   return a.localeCompare(b);
 }
 
 function compareSessions(a: AgentSession, b: AgentSession): number {
-  const aUnknown = isUnknown(a.session) ? 1 : 0;
-  const bUnknown = isUnknown(b.session) ? 1 : 0;
-  if (aUnknown !== bUnknown) return aUnknown - bUnknown;
-  return latestCreatedAt(b.submissions).localeCompare(latestCreatedAt(a.submissions));
+  if (a.scope.kind !== b.scope.kind) return a.scope.kind === "unscoped" ? 1 : -1;
+  return latestCreatedAt(b.submissions).localeCompare(latestCreatedAt(a.submissions))
+    || (a.scope.kind === "native" && b.scope.kind === "native" ? a.scope.id.localeCompare(b.scope.id) : 0);
 }
 
-function compareTools(a: AgentTool, b: AgentTool): number {
-  const aUnknown = isUnknown(a.tool) ? 1 : 0;
-  const bUnknown = isUnknown(b.tool) ? 1 : 0;
-  if (aUnknown !== bUnknown) return aUnknown - bUnknown;
-  return a.tool.localeCompare(b.tool);
-}
-
-function compareHosts(a: AgentHost, b: AgentHost): number {
-  const aUnknown = isUnknown(a.host) ? 1 : 0;
-  const bUnknown = isUnknown(b.host) ? 1 : 0;
-  if (aUnknown !== bUnknown) return aUnknown - bUnknown;
-  return a.host.localeCompare(b.host);
-}
-
-/**
- * Group submissions by their canonical host/tool/session identity.
- *
- * The resulting tree is sorted so that known identities appear before unknown
- * ones, making operational scanning easier. Sessions are ordered by recency.
- */
+/** Groups submissions by the full Host + Tool + native/unscoped identity. */
 export function groupSubmissionsByIdentity(submissions: Submission[]): AgentHost[] {
-  const tree = new Map<string, Map<string, Map<string, Submission[]>>>();
+  const tree = new Map<string, Map<string, Map<string, AgentSession>>>();
 
   for (const submission of submissions) {
     const host = canonicalHost(submission);
     const tool = canonicalTool(submission);
-    const session = canonicalSession(submission);
-
-    const byTool = tree.get(host) ?? new Map<string, Map<string, Submission[]>>();
-    const bySession = byTool.get(tool) ?? new Map<string, Submission[]>();
-    bySession.set(session, [...(bySession.get(session) ?? []), submission]);
+    const scope = sessionScope(submission);
+    const key = scope.kind === "native" ? `native\0${scope.id}` : "unscoped";
+    const byTool = tree.get(host) ?? new Map<string, Map<string, AgentSession>>();
+    const bySession = byTool.get(tool) ?? new Map<string, AgentSession>();
+    const entry = bySession.get(key) ?? { scope, submissions: [] };
+    entry.submissions.push(submission);
+    bySession.set(key, entry);
     byTool.set(tool, bySession);
     tree.set(host, byTool);
   }
@@ -96,43 +91,63 @@ export function groupSubmissionsByIdentity(submissions: Submission[]): AgentHost
       tools: [...byTool.entries()]
         .map(([tool, bySession]) => ({
           tool,
-          sessions: [...bySession.entries()]
-            .map(([session, items]) => ({ session, submissions: items.sort((a, b) => b.created_at.localeCompare(a.created_at)) }))
+          sessions: [...bySession.values()]
+            .map((entry) => ({ ...entry, submissions: entry.submissions.sort(compareSubmission) }))
             .sort(compareSessions),
         }))
-        .sort(compareTools),
+        .sort((a, b) => compareKnownThenName(a.tool, b.tool)),
     }))
-    .sort(compareHosts);
+    .sort((a, b) => compareKnownThenName(a.host, b.host));
 }
 
-export function selectedSessionRecords(
-  groups: AgentHost[],
-  host: string,
-  tool: string,
-  session: string,
-): Submission[] | undefined {
-  for (const hostNode of groups) {
-    if (hostNode.host !== host) continue;
-    for (const toolNode of hostNode.tools) {
-      if (toolNode.tool !== tool) continue;
-      for (const sessionNode of toolNode.sessions) {
-        if (sessionNode.session === session) return sessionNode.submissions;
-      }
-    }
-  }
-  return undefined;
+export function scopeRecords(groups: AgentHost[], scope: AgentScope): Submission[] | undefined {
+  const host = groups.find((entry) => entry.host === scope.host);
+  if (!host) return undefined;
+  if (scope.kind === "host") return host.tools.flatMap((tool) => tool.sessions.flatMap((session) => session.submissions)).sort(compareSubmission);
+  const tool = host.tools.find((entry) => entry.tool === scope.tool);
+  if (!tool) return undefined;
+  if (scope.kind === "tool") return tool.sessions.flatMap((session) => session.submissions).sort(compareSubmission);
+  const target = tool.sessions.find((entry) =>
+    scope.kind === "unscoped"
+      ? entry.scope.kind === "unscoped"
+      : entry.scope.kind === "native" && entry.scope.id === scope.session,
+  );
+  return target?.submissions;
+}
+
+export function makeAgentsHostRoute(host: string): string {
+  return `agents/host/${encodeURIComponent(host)}`;
+}
+
+export function makeAgentsToolRoute(host: string, tool: string): string {
+  return `agents/tool/${encodeURIComponent(host)}/${encodeURIComponent(tool)}`;
 }
 
 export function makeAgentsSessionRoute(host: string, tool: string, session: string): string {
-  return `agents/${[host, tool, session].map(encodeURIComponent).join("/")}`;
+  return `agents/session/${encodeURIComponent(host)}/${encodeURIComponent(tool)}/${encodeURIComponent(session)}`;
 }
 
-export function parseAgentsSessionRoute(id: string): { host: string; tool: string; session: string } | null {
-  const parts = id.split("/");
-  if (parts.length !== 3) return null;
-  return {
-    host: decodeURIComponent(parts[0]!),
-    tool: decodeURIComponent(parts[1]!),
-    session: decodeURIComponent(parts[2]!),
-  };
+export function makeAgentsUnscopedRoute(host: string, tool: string): string {
+  return `agents/unscoped/${encodeURIComponent(host)}/${encodeURIComponent(tool)}`;
+}
+
+function decode(parts: string[]): string[] | null {
+  try {
+    return parts.map(decodeURIComponent);
+  } catch {
+    return null;
+  }
+}
+
+export function parseAgentsRoute(id: string): AgentScope | null {
+  const raw = id.split("/");
+  const parts = decode(raw);
+  if (!parts) return null;
+  if (parts[0] === "host" && parts.length === 2) return { kind: "host", host: parts[1]! };
+  if (parts[0] === "tool" && parts.length === 3) return { kind: "tool", host: parts[1]!, tool: parts[2]! };
+  if (parts[0] === "session" && parts.length === 4) return { kind: "session", host: parts[1]!, tool: parts[2]!, session: parts[3]! };
+  if (parts[0] === "unscoped" && parts.length === 3) return { kind: "unscoped", host: parts[1]!, tool: parts[2]! };
+  // Legacy #agents/<host>/<tool>/<session> URLs remain native-session routes.
+  if (parts.length === 3) return { kind: "session", host: parts[0]!, tool: parts[1]!, session: parts[2]! };
+  return null;
 }
