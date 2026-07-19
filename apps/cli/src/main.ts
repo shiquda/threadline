@@ -472,20 +472,23 @@ initiative
 const task = program.command("task").description("manage project-scoped Tasks");
 task
   .command("create")
-  .requiredOption("--initiative <id>")
   .requiredOption("--title <title>")
   .option("--detail <detail>")
-  .action(async (options: { initiative: string; title: string; detail?: string }) => {
+  .action(async (options: { title: string; detail?: string }) => {
     const context = await resolveContext();
+    const target = initiativeId(undefined, context);
     await write({
       operation: "task.create", path: "/api/v1/tasks", method: "POST", idempotent: true,
-      body: { initiative_id: options.initiative, title: options.title, ...(options.detail ? { detail: options.detail } : {}), actor: context.actor },
+      body: { initiative_id: target, title: options.title, ...(options.detail ? { detail: options.detail } : {}), actor: context.actor },
     }, context);
   });
 task
   .command("list")
-  .requiredOption("--initiative <id>")
-  .action(async (options: { initiative: string }) => output(await request<Task[]>(`/api/v1/tasks?initiative_id=${encodeURIComponent(options.initiative)}`)));
+  .action(async () => {
+    const context = await resolveContext();
+    const target = initiativeId(undefined, context);
+    output(await request<Task[]>(`/api/v1/tasks?initiative_id=${encodeURIComponent(target)}`));
+  });
 task.command("get <id>").action(async (id: string) => output(await request<Task>(`/api/v1/tasks/${id}`)));
 task
   .command("update <id>")
@@ -766,18 +769,20 @@ program.command("sync").description("record an event and its projected state, or
   output({ context: { ...context.actor, ...(context.initiativeId ? { initiative_id: context.initiativeId } : {}) }, workboard, ...(decisions ? { decisions } : {}) });
 });
 
-program.command("verify-complete [initiative-id]").description("verify an initiative is completed with no unresolved decisions").action(async (id: string | undefined) => {
+program.command("verify-complete [initiative-id]").description("verify an initiative is completed with no unresolved decisions or open Tasks").action(async (id: string | undefined) => {
   const context = await resolveContext();
   const target = initiativeId(id, context);
-  const [item, decisions, submissions] = await Promise.all([
+  const [item, decisions, submissions, tasks] = await Promise.all([
     request<{ status?: string }>(`/api/v1/initiatives/${target}`),
     request<Array<{ id: string; status: string }>>(`/api/v1/decisions?initiative_id=${encodeURIComponent(target)}`),
     request<Array<{ kind: string }>>(`/api/v1/submissions?initiative_id=${encodeURIComponent(target)}`),
+    request<Task[]>(`/api/v1/tasks?initiative_id=${encodeURIComponent(target)}`),
   ]);
   const unresolved = decisions.filter((entry) => !["resolved", "expired", "superseded"].includes(entry.status));
   const deliveries = submissions.filter((entry) => entry.kind === "delivery");
-  const complete = item.status === "completed" && unresolved.length === 0 && deliveries.length > 0;
-  output({ initiative_id: target, complete, checks: { initiative_status: item.status, unresolved_decisions: unresolved, deliveries: deliveries.length } });
+  const openTasks = tasks.filter((entry) => entry.status === "open");
+  const complete = item.status === "completed" && unresolved.length === 0 && deliveries.length > 0 && openTasks.length === 0;
+  output({ initiative_id: target, complete, checks: { initiative_status: item.status, unresolved_decisions: unresolved, deliveries: deliveries.length, open_tasks: openTasks } });
   if (!complete) process.exitCode = 2;
 });
 

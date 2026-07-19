@@ -13,18 +13,38 @@ Read [references/cli.md](references/cli.md) before the first CLI operation or wh
 
 1. Confirm the CLI can reach the configured Gateway with `threadline --json status`.
 2. Set accurate `THREADLINE_TOOL` and `THREADLINE_SESSION_ID` values for the current session before any write. The CLI records the local hostname automatically; use `THREADLINE_ACTOR_HOST` only when it needs an explicit override. `THREADLINE_RUNTIME` remains a compatibility fallback for older integrations.
-3. Use an existing initiative when the work belongs to one. Create an initiative only when a durable work theme is intentional; never infer one from a single unrelated message.
+3. Reuse an existing Initiative when the work belongs to its durable theme. Create one only for an intentional, continuing body of work that needs shared state across sessions or actors; do not infer one from a single unrelated message.
+4. At a resume or handoff boundary, inspect the Initiative, its Tasks, linked Submissions, open Decisions, and the Workboard before claiming its state or creating duplicate work.
 
 Do not expose, print, or commit `THREADLINE_TOKEN`.
+
+## Replace a Todo lifecycle
+
+Treat Threadline records as a hierarchy with distinct responsibilities:
+
+- An **Initiative** is the durable work theme and its shared state. It is not a catch-all for unrelated one-off requests.
+- A **Task** is a concrete, resumable unit of work inside one Initiative. Create a Task only when its progress or completion needs to be tracked independently. Tasks have a title, optional detail, and an `open` or `completed` status; do not invent assignees, dependencies, priorities, due dates, or waiting states.
+- A **Submission** preserves a meaningful result, checkpoint, recommendation, alert, or decision request. Attach artifact and evidence references to the Submission, then link that Submission to the Task it supports. A linked Submission must belong to the same Initiative as the Task.
+- A **Decision** records a question that needs a human outcome. It is not completed merely by waiting, reading, or changing the Initiative state.
+
+For work that replaces a Todo list:
+
+1. Reuse or create the Initiative, then list its Tasks before adding one. Create a concise Task for each independently trackable unit of work.
+2. Keep a Task `open` while work remains. Update its title or detail when the durable scope changes. Mark it `completed` only when its actual unit of work is finished; reopen it when that conclusion becomes untrue.
+3. Record durable progress or delivery as a Submission with the Initiative attached. Put evidence in `--evidence`, use `--detail-ref` for an artifact reference, and link the Submission to the relevant Task.
+4. Use Initiative state to communicate the overall coordination condition, separately from Task status: `ready` for active work, `wait` when an outside condition blocks it, and `done` only at the completion gate.
+
+Do not create a Task for transient reasoning or routine command execution. Do not use a Task as a substitute for an authorization Decision.
 
 ## Completion gate
 
 Before declaring a scoped piece of work complete, pause at this gate:
 
 1. Confirm the result is actually complete, or explicitly state the remaining blocker or limitation.
-2. Attach the durable context needed to understand the result later: the initiative when one exists, a concise conclusion, relevant evidence or artifact reference, and the originating runtime, agent, and session attribution.
-3. Check whether this work created or is governed by an open Decision. Close that exact Decision when the user has supplied an explicit outcome; otherwise leave it open and say what is still needed.
-4. Submit one durable `delivery`, `progress_update`, or `alert` when the result changes shared coordination. Do not replace the delivery with ordinary chat narration.
+2. For an Initiative, list its Tasks and make sure every Task is `completed`. Finish or reopen individual Tasks before attempting Initiative completion.
+3. List the Initiative's Decisions. Resolve the exact Decision after the user has supplied an explicit outcome; leave unresolved Decisions open and do not treat them as approval.
+4. Submit a durable `delivery` that states the conclusion and links relevant evidence or artifact references. Link it to the completed Task when applicable.
+5. Only then mark the Initiative `done`, then run `verify-complete`. A failed verification means the Initiative is not complete; correct the missing Task, Decision, delivery, or state instead of declaring success.
 
 Do not claim completion merely because commands passed, a user saw a draft, or the Agent is ending its session. A blocked or partial result is still valuable when recorded accurately as such.
 
@@ -90,10 +110,17 @@ When the user answers a submitted decision in this session:
 
 Never resolve a decision merely because the user viewed it, changed topics, or failed to respond.
 
+## Progress, waiting, and state sync
+
+- Use `ready` with a next action when the Initiative is actively actionable. It updates Initiative state; it does not create or complete a Task.
+- Use `wait` when progress is blocked by a human, external dependency, or failure. Keep unfinished Tasks open. With `wait --on human --question`, the CLI records a Decision request and puts the Initiative into the waiting state; resolve that exact Decision after the user answers.
+- Use `sync --event` or `sync --summary` to record a durable checkpoint and project its Initiative state in one write. Include `--evidence` for durable references, and use `--status ready`, `waiting`, or `done` deliberately. Do not use `sync --status done` to bypass the completion gate.
+- With no event or summary, `sync` only inspects the attached context, Workboard, and attached Initiative Decisions. It does not create a record or change state.
+
 ## Coordinate with existing state
 
 - Query a known decision ID before re-asking a question after a resume or context handoff.
-- Read the Workboard before claiming who or what an initiative is waiting for.
-- Update an initiative's status and next step when the coordination state materially changes.
+- Read the Workboard and the Initiative's Tasks before claiming who or what an Initiative is waiting for or complete.
+- Update an Initiative's status and next step when the coordination state materially changes. Update a Task separately when its own scope or completion changes.
 - Preserve actor and session attribution on every mutation.
 - Do not poll Threadline in the background. Query at natural workflow boundaries only.

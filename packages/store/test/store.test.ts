@@ -117,6 +117,60 @@ describe("ThreadlineStore core initiative projection", () => {
     }).submission;
     expect(() => store.linkTaskSubmission(task.id, unrelated.id, actor)).toThrow("same Initiative");
   });
+
+  it("blocks completion aliases while Tasks are open, then allows completion once they are finished", () => {
+    const initiative = store.createInitiative({ title: "Release", intent: "Complete every Task", actor });
+    const task = store.createTask({ initiative_id: initiative.id, title: "Verify release", actor });
+
+    for (const input of [
+      { lifecycle: "done" as const },
+      { status: "completed" as const },
+      { status: "cancelled" as const },
+    ]) {
+      expect(() => store.updateInitiative(initiative.id, { ...input, actor }))
+        .toThrow(/cannot transition to done while it has open Tasks/);
+      expect(store.getInitiative(initiative.id)).toMatchObject({ lifecycle: "open", status: "active" });
+    }
+
+    store.updateTask(task.id, { status: "completed", actor });
+    expect(store.updateInitiative(initiative.id, { status: "cancelled", actor }))
+      .toMatchObject({ lifecycle: "done", status: "cancelled" });
+  });
+
+  it("rolls back a submission that tries to complete an Initiative with open Tasks", () => {
+    const initiative = store.createInitiative({ title: "Deploy", intent: "Ship only after validation", actor });
+    const task = store.createTask({ initiative_id: initiative.id, title: "Run smoke tests", actor });
+    const submission = {
+      kind: "delivery" as const,
+      title: "Deployment complete",
+      summary: "The release was deployed.",
+      initiative_id: initiative.id,
+      initiative_update: { lifecycle: "done" as const },
+      attention_policy: "record_only" as const,
+      actor,
+    };
+
+    expect(() => store.createSubmission(submission)).toThrow(/cannot transition to done while it has open Tasks/);
+    expect(store.listSubmissions(initiative.id)).toEqual([]);
+    expect(store.getInitiative(initiative.id)).toMatchObject({ lifecycle: "open", status: "active" });
+
+    store.updateTask(task.id, { status: "completed", actor });
+    expect(store.createSubmission(submission).submission).toMatchObject({ title: "Deployment complete" });
+    expect(store.getInitiative(initiative.id)).toMatchObject({ lifecycle: "done", status: "completed" });
+  });
+
+  it("rejects creating or reopening open Tasks after an Initiative is done", () => {
+    const initiative = store.createInitiative({ title: "Archive", intent: "Close cleanly", actor });
+    const task = store.createTask({ initiative_id: initiative.id, title: "Attach evidence", actor });
+    store.updateTask(task.id, { status: "completed", actor });
+    store.updateInitiative(initiative.id, { lifecycle: "done", actor });
+
+    expect(() => store.createTask({ initiative_id: initiative.id, title: "Late task", actor }))
+      .toThrow(/is done and cannot accept open Tasks/);
+    expect(() => store.updateTask(task.id, { status: "open", actor }))
+      .toThrow(/is done and cannot accept open Tasks/);
+    expect(store.listTasks(initiative.id)).toMatchObject([{ id: task.id, status: "completed" }]);
+  });
 });
 
 describe("ThreadlineStore execution identity", () => {

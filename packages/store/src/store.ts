@@ -218,19 +218,19 @@ export class ThreadlineStore {
   }
 
   updateInitiative(id: string, input: UpdateInitiativeInput): Initiative {
-    const current = this.getInitiative(id);
-    const timestamp = now();
-    const state = deriveInitiativeState(current, input);
-    const updated: Initiative = {
-      ...current,
-      title: input.title ?? current.title,
-      intent: input.intent ?? current.intent,
-      ...state,
-      updated_at: timestamp,
-      last_activity_at: timestamp,
-    };
-
-    const write = this.db.transaction(() => {
+    return this.db.transaction(() => {
+      const current = this.getInitiative(id);
+      const timestamp = now();
+      const state = deriveInitiativeState(current, input);
+      this.assertInitiativeCanTransitionToDone(current, state.lifecycle);
+      const updated: Initiative = {
+        ...current,
+        title: input.title ?? current.title,
+        intent: input.intent ?? current.intent,
+        ...state,
+        updated_at: timestamp,
+        last_activity_at: timestamp,
+      };
       this.db
         .prepare(
           `UPDATE initiatives
@@ -247,9 +247,30 @@ export class ThreadlineStore {
         owner: updated.owner,
         next_action: updated.next_action,
       });
-    });
-    write();
-    return updated;
+      return updated;
+    })();
+  }
+
+  private assertInitiativeCanTransitionToDone(
+    initiative: Initiative,
+    lifecycle: InitiativeLifecycle,
+  ): void {
+    if (initiative.lifecycle === "done" || lifecycle !== "done") return;
+    const openTask = this.db
+      .prepare("SELECT 1 FROM tasks WHERE initiative_id = ? AND status = 'open' LIMIT 1")
+      .get(initiative.id);
+    if (openTask) {
+      throw new StoreError(
+        "conflict",
+        `Initiative ${initiative.id} cannot transition to done while it has open Tasks`,
+      );
+    }
+  }
+
+  private assertInitiativeAcceptsOpenTasks(initiative: Initiative): void {
+    if (initiative.lifecycle === "done") {
+      throw new StoreError("conflict", `Initiative ${initiative.id} is done and cannot accept open Tasks`);
+    }
   }
 
   createSubmission(input: CreateSubmissionInput, idempotencyKey?: string): SubmissionResult {
@@ -374,6 +395,7 @@ export class ThreadlineStore {
         const statePatch = input.initiative_update ?? impliedState;
         if (statePatch) {
           const state = deriveInitiativeState(initiativeBefore, statePatch);
+          this.assertInitiativeCanTransitionToDone(initiativeBefore, state.lifecycle);
           this.db
             .prepare(
               `UPDATE initiatives
@@ -492,6 +514,7 @@ export class ThreadlineStore {
       completed_by: null,
     };
     this.db.transaction(() => {
+      this.assertInitiativeAcceptsOpenTasks(this.getInitiative(input.initiative_id));
       this.db.prepare(
         `INSERT INTO tasks
          (id, initiative_id, title, detail, status, created_at, updated_at, created_by, completed_at, completed_by)
@@ -516,20 +539,23 @@ export class ThreadlineStore {
   }
 
   updateTask(id: string, input: UpdateTaskInput): Task {
-    const current = this.getTask(id);
-    const timestamp = now();
-    const status = input.status ?? current.status;
-    const changedStatus = status !== current.status;
-    const task: Task = {
-      ...current,
-      title: input.title ?? current.title,
-      detail: hasOwn(input, "detail") ? input.detail ?? null : current.detail,
-      status,
-      updated_at: timestamp,
-      completed_at: status === "completed" ? (current.completed_at ?? timestamp) : null,
-      completed_by: status === "completed" ? (current.completed_by ?? input.actor.actor_name) : null,
-    };
-    this.db.transaction(() => {
+    return this.db.transaction(() => {
+      const current = this.getTask(id);
+      const timestamp = now();
+      const status = input.status ?? current.status;
+      const changedStatus = status !== current.status;
+      if (status === "open" && current.status !== "open") {
+        this.assertInitiativeAcceptsOpenTasks(this.getInitiative(current.initiative_id));
+      }
+      const task: Task = {
+        ...current,
+        title: input.title ?? current.title,
+        detail: hasOwn(input, "detail") ? input.detail ?? null : current.detail,
+        status,
+        updated_at: timestamp,
+        completed_at: status === "completed" ? (current.completed_at ?? timestamp) : null,
+        completed_by: status === "completed" ? (current.completed_by ?? input.actor.actor_name) : null,
+      };
       this.db.prepare(
         `UPDATE tasks SET title = @title, detail = @detail, status = @status, updated_at = @updated_at,
          completed_at = @completed_at, completed_by = @completed_by WHERE id = @id`,
@@ -537,8 +563,8 @@ export class ThreadlineStore {
       this.writeEvent("task", id, changedStatus ? `task.${status}` : "task.updated", input.actor, {
         initiative_id: task.initiative_id,
       });
+      return task;
     })();
-    return task;
   }
 
   listTaskSubmissions(taskId: string): Submission[] {

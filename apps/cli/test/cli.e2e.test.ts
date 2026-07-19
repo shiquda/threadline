@@ -63,6 +63,17 @@ describe("Threadline CLI", () => {
     return JSON.parse(result.stdout.trim()) as unknown;
   }
 
+  async function runExpectingExitCode(args: string[], exitCode: number): Promise<unknown> {
+    try {
+      await run(args);
+      throw new Error(`Expected command to exit with code ${exitCode}.`);
+    } catch (error) {
+      const result = error as NodeJS.ErrnoException & { code?: number | string; stdout?: string };
+      expect(result.code).toBe(exitCode);
+      return JSON.parse(result.stdout?.trim() ?? "") as unknown;
+    }
+  }
+
   it("runs the decision workflow against a configurable Gateway", async () => {
     expect(await run(["status"])).toEqual({ status: "ok" });
 
@@ -305,6 +316,63 @@ describe("Threadline CLI", () => {
     const submissions = (await run(["submission", "list"])) as Array<{ initiative_id: string | null }>;
     expect(submissions.filter((entry) => entry.initiative_id === initiative.id)).toHaveLength(1);
     expect(await run(["verify-complete", initiative.id])).toMatchObject({ initiative_id: initiative.id, complete: true });
+  });
+
+  it("creates and lists Tasks with global or attached initiative context, and gates completion on open Tasks", async () => {
+    const initiative = (await run([
+      "initiative",
+      "create",
+      "--title",
+      "Task lifecycle",
+      "--intent",
+      "Do not complete while implementation Tasks remain open",
+    ])) as { id: string };
+
+    const explicitTask = (await run([
+      "task",
+      "create",
+      "--initiative",
+      initiative.id,
+      "--title",
+      "Ship lifecycle gate",
+    ])) as { id: string; initiative_id: string; status: string };
+    expect(explicitTask).toMatchObject({ initiative_id: initiative.id, status: "open" });
+
+    expect(await run(["task", "list", "--initiative", initiative.id])).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: explicitTask.id })]),
+    );
+
+    await run(["attach", "--initiative", initiative.id]);
+    const attachedTask = (await run([
+      "task",
+      "create",
+      "--title",
+      "Verify task completion",
+    ])) as { id: string; initiative_id: string };
+    expect(attachedTask.initiative_id).toBe(initiative.id);
+    expect(await run(["task", "list"])).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: attachedTask.id })]),
+    );
+
+    expect(await runExpectingExitCode(["verify-complete", initiative.id], 2)).toMatchObject({
+      initiative_id: initiative.id,
+      complete: false,
+      checks: {
+        open_tasks: expect.arrayContaining([
+          expect.objectContaining({ id: explicitTask.id, status: "open" }),
+          expect.objectContaining({ id: attachedTask.id, status: "open" }),
+        ]),
+      },
+    });
+
+    await run(["task", "update", explicitTask.id, "--complete"]);
+    await run(["task", "update", attachedTask.id, "--complete"]);
+    await run(["done", initiative.id, "--summary", "All initiative Tasks are complete."]);
+    expect(await run(["verify-complete", initiative.id])).toMatchObject({
+      initiative_id: initiative.id,
+      complete: true,
+      checks: { open_tasks: [] },
+    });
   });
 
   it("synchronizes a durable event and projects Done atomically", async () => {
