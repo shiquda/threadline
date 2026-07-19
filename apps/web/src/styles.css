@@ -94,6 +94,8 @@ textarea { resize: vertical; }
 .mini-inbox strong, .mini-inbox span { overflow-wrap: anywhere; }
 
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.filter-groups { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
+.filter-groups > .filter-group + .filter-group { padding-left: 12px; border-left: 1px solid var(--border); }
 .filter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .search-input { width: min(100%, 300px); min-height: 36px; padding: 7px 12px; border: 1px solid var(--border); border-radius: var(--r-input); background: var(--bg); }
 .search-input::placeholder { color: var(--muted); }
@@ -221,6 +223,7 @@ textarea { resize: vertical; }
   .mini-inbox { grid-template-columns: 1fr auto; gap: 8px 12px; }
   .mini-inbox .badge { grid-row: 1 / span 2; }
   .inbox-item { grid-template-columns: 1fr; gap: 10px; }
+  .filter-groups { justify-content: flex-start; width: 100%; }
   .item-actions { opacity: 1; }
   .item-kind { min-height: 0; }
   .board { grid-template-columns: 1fr; }
