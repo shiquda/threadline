@@ -123,7 +123,7 @@ textarea { resize: vertical; }
 .badge-decision { color: var(--accent-on); background: color-mix(in oklab, var(--accent), transparent 65%); }
 .badge-info { color: var(--fg); background: color-mix(in oklab, var(--fg), transparent 92%); }
 
-.board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 16px; align-items: start; }
+.board { display: grid; grid-template-columns: repeat(3, minmax(240px, 1fr)); gap: 16px; align-items: start; }
 .lane { overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-card); }
 .lane-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .lane-header h2 { margin: 0; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
@@ -135,6 +135,10 @@ textarea { resize: vertical; }
 .work-card h3 { font-size: 16px; line-height: 1.25; text-wrap: pretty; overflow-wrap: anywhere; }
 .work-card p { display: grid; gap: 2px; margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.4; text-wrap: pretty; overflow-wrap: anywhere; }
 .work-card p span { color: var(--fg); font-size: 12px; font-weight: 700; }
+.work-card-context { display: grid; gap: 8px; margin-top: 12px; }
+.work-card-context > div { min-width: 0; }
+.work-card-context dt { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.work-card-context dd { margin-top: 2px; font-size: 13px; line-height: 1.35; text-wrap: pretty; overflow-wrap: anywhere; }
 .work-card footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
 
 .table-wrap { overflow-x: auto; }

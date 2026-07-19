@@ -7,6 +7,7 @@ import {
 import type { AuditEvent, Decision, InboxItem, Initiative, InitiativeStatus, Submission, Workboard } from "@threadline/protocol";
 import { ThreadlineApi, readConnection, writeConnection, type Connection } from "./api.js";
 import { formatDate, humanize, I18nProvider, supportedLocales, useI18n, type Locale } from "./i18n.js";
+import { initiativeRecord, normalizeWorkboard, type InitiativeRecord } from "./workboard.js";
 import "./styles.css";
 
 type Page = "overview" | "inbox" | "workboard" | "decisions" | "initiative" | "decision" | "submission";
@@ -194,13 +195,17 @@ function IconAction({ label, children, ...props }: { label: string; children: Re
 function WorkboardPage({ api }: { api: ThreadlineApi }) {
   const { t } = useI18n();
   const data = useLoad(() => api.workboard(), [api]);
-  const lanes: Array<[string, Initiative[]]> = data.value ? [[t("In progress"), data.value.active], [t("Waiting for you"), data.value.waiting_for_jim], [t("Waiting for Agent"), data.value.waiting_for_agent], [t("Paused / done"), data.value.paused_or_done]] : [];
-  return <PageHeader title={t("Workboard")} subtitle={t("Running initiatives grouped by who they are waiting on.")}>{data.loading ? <StateBox title={t("Loading Workboard")}>{t("Fetching current initiative states.")}</StateBox> : data.error ? <StateBox title={t("Could not load Workboard")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : <div className="board">{lanes.map(([label, initiatives]) => <section className="lane" key={label}><header className="lane-header"><h2>{label}</h2><span>{initiatives.length}</span></header><div className="lane-body">{initiatives.length ? initiatives.map((initiative) => <InitiativeCard initiative={initiative} key={initiative.id} />) : <div className="lane-empty">{t("No initiatives")}</div>}</div></section>)}</div>}</PageHeader>;
+  const board = normalizeWorkboard(data.value);
+  const lanes: Array<[string, InitiativeRecord[]]> = [[t("Ready"), board.ready], [t("Waiting"), board.waiting], [t("Done"), board.done]];
+  return <PageHeader title={t("Workboard")} subtitle={t("Initiatives grouped by their next state.")}>{data.loading ? <StateBox title={t("Loading Workboard")}>{t("Fetching current initiative states.")}</StateBox> : data.error ? <StateBox title={t("Could not load Workboard")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : <div className="board">{lanes.map(([label, initiatives]) => <section className="lane" key={label}><header className="lane-header"><h2>{label}</h2><span>{initiatives.length}</span></header><div className="lane-body">{initiatives.length ? initiatives.map((initiative, index) => <InitiativeCard initiative={initiative} key={initiative.id ?? `${label}-${index}`} />) : <div className="lane-empty">{t("No initiatives")}</div>}</div></section>)}</div>}</PageHeader>;
 }
 
-function InitiativeCard({ initiative }: { initiative: Initiative }) {
+function InitiativeCard({ initiative }: { initiative: InitiativeRecord }) {
   const { locale, t } = useI18n();
-  return <a className="work-card" href={`#initiative/${initiative.id}`}><h3>{initiative.title}</h3><p><span>{t("Intent")}</span>{initiative.intent}</p><p><span>{t("Next")}</span>{initiative.next_step ?? t("No next step recorded")}</p><footer><Badge tone={initiative.status}>{displayStatus(t, initiative.status)}</Badge><span>{formatDate(locale, initiative.last_activity_at)}</span></footer></a>;
+  const record = initiativeRecord(initiative);
+  const title = initiative.title || t("Untitled initiative");
+  const status = initiative.status || "info";
+  return <a className="work-card" href={initiative.id ? `#initiative/${initiative.id}` : "#workboard"}><h3>{title}</h3><p><span>{t("Intent")}</span>{initiative.intent || t("Not recorded")}</p><dl className="work-card-context"><div><dt>{t("Owner")}</dt><dd>{record.owner ?? t("Not recorded")}</dd></div><div><dt>{t("Next action")}</dt><dd>{record.nextAction ?? t("Not recorded")}</dd></div><div><dt>{t("Blocker")}</dt><dd>{record.blocker ?? t("No blocker recorded")}</dd></div><div><dt>{t("Recent fact")}</dt><dd>{record.recentFact ?? t("No recent fact recorded")}</dd></div><div><dt>{t("Record language")}</dt><dd>{record.recordLanguage ?? t("Not recorded")}</dd></div></dl><footer><Badge tone={status}>{displayStatus(t, status)}</Badge><span>{formatDate(locale, initiative.last_activity_at ?? null)}</span></footer></a>;
 }
 
 function DecisionsPage({ api }: { api: ThreadlineApi }) {

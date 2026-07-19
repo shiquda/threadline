@@ -23,7 +23,7 @@ threadline config show
 ```
 
 Place the global `--json` option before the command.
-For a retried create operation, also reuse `--idempotency-key <stable-key>` before the command.
+For a retried create operation, choose `--idempotency-key <stable-key>` before the first attempt and reuse that exact value before every retry. Do not create a new idempotency key after an uncertain response.
 
 ## Inspect shared state
 
@@ -55,13 +55,17 @@ threadline --json initiative update <initiative-id> \
 ## Submit standard content
 
 ```bash
-threadline --json submission create \
+threadline --json --idempotency-key "<stable-key>" submission create \
   --kind delivery \
   --title "API contract complete" \
   --summary "The core routes and state transitions are implemented and tested." \
+  --detail "The response contract and error handling are covered by the focused suite." \
+  --detail-ref "<artifact-reference>" \
   --initiative <initiative-id> \
   --attention inbox
 ```
+
+Use `--detail` for compact supporting context and `--detail-ref` for a durable artifact reference. Preserve source and user-provided text in its original language unless the user requests a translation.
 
 Record content the user already saw without creating Active Inbox attention:
 
@@ -74,6 +78,8 @@ threadline --json submission create \
   --attention inbox \
   --observed
 ```
+
+`--dedupe-key` consolidates related active Inbox attention; `--idempotency-key` protects a retried logical create. Use both when the same update needs both properties, and keep each value stable for its purpose.
 
 ## Request and resolve a decision
 
@@ -98,6 +104,8 @@ threadline --json decision resolve <decision-id> \
 ```
 
 Run `threadline --json decision get <decision-id>` before asking again after a resume.
+
+When resolving a Decision, preserve the user's explicit outcome exactly, including its language. An identical already-resolved outcome is successful; a different outcome is a conflict that must be surfaced instead of overwritten.
 
 ## Manage Inbox state
 
