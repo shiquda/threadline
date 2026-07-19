@@ -178,6 +178,18 @@ describe("Threadline CLI", () => {
       "The session override wins.",
     ], false)) as { language: { source: string; tag: string } };
     expect(policyReceipt.language).toMatchObject({ source: "session", tag: "ja-JP" });
+
+    const localized = (await run([
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "Persisted language",
+      "--summary",
+      "The configured session language is stored with this fact.",
+    ], false)) as { submission: { content_language: string } };
+    expect(localized.submission.content_language).toBe("ja-JP");
   });
 
   it("explains deterministic dry-run writes and completion records delivery plus state", async () => {
@@ -222,9 +234,41 @@ describe("Threadline CLI", () => {
       state: { status: string };
     };
     expect(done).toMatchObject({
-      delivery: { submission: { kind: "progress_update", initiative_id: initiative.id } },
+      delivery: { submission: { kind: "delivery", initiative_id: initiative.id } },
       state: { status: "completed" },
     });
+    await run(["done", initiative.id, "--summary", "All required work is complete."]);
+    const submissions = (await run(["submission", "list"])) as Array<{ initiative_id: string | null }>;
+    expect(submissions.filter((entry) => entry.initiative_id === initiative.id)).toHaveLength(1);
     expect(await run(["verify-complete", initiative.id])).toMatchObject({ initiative_id: initiative.id, complete: true });
+  });
+
+  it("synchronizes a durable event and projects Done atomically", async () => {
+    const initiative = (await run([
+      "initiative",
+      "create",
+      "--title",
+      "Cutover workflow",
+      "--intent",
+      "Record a cutover with its resulting state",
+    ])) as { id: string };
+
+    const synced = (await run([
+      "--initiative",
+      initiative.id,
+      "sync",
+      "--event",
+      "cutover",
+      "--summary",
+      "Old host is down and the target is healthy.",
+      "--status",
+      "done",
+      "--next",
+      "Reauthenticate Tailscale if remote mesh access is needed.",
+      "--evidence",
+      "healthcheck:ok,cutover:complete",
+    ])) as { submission: { kind: string; evidence_refs: string[] }; initiative?: { lifecycle: string } };
+    expect(synced.submission).toMatchObject({ kind: "delivery", evidence_refs: ["healthcheck:ok", "cutover:complete"] });
+    expect((await run(["initiative", "get", initiative.id])) as { lifecycle: string }).toMatchObject({ lifecycle: "done" });
   });
 });

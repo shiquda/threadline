@@ -68,7 +68,7 @@ program
   .option("--agent <agent>", "Agent name")
   .option("--session <id>", "Agent session ID")
   .option("--initiative <id>", "default initiative for this command")
-  .option("--language <bcp47>", "content language for this command")
+  .option("--language <bcp47>, --lang <bcp47>", "content language for this command")
   .option("--idempotency-key <key>", "stable retry key for create operations");
 
 function globalOptions(): GlobalOptions {
@@ -151,6 +151,12 @@ function validateLanguage(tag: string): string {
   }
 }
 
+function inferInteractionLanguage(): string {
+  const raw = process.env.THREADLINE_INTERACTION_LANGUAGE ?? process.env.LANG ?? "en";
+  const normalized = raw.split(".")[0]!.replace(/_/g, "-");
+  return /^(?:C|POSIX)$/i.test(normalized) ? "en" : normalized;
+}
+
 function resolveLanguage(
   policy: LanguagePolicy | undefined,
   context: ResolvedContext,
@@ -166,10 +172,8 @@ function resolveLanguage(
         ? { tag: policy.initiatives[initiativeId], source: "initiative" as const }
         : policy?.fixed
           ? { tag: policy.fixed, source: "workspace" as const }
-          : policy?.interaction
-            ? { tag: policy.interaction, source: "interaction" as const }
-            : undefined;
-  return candidate ? { ...candidate, tag: validateLanguage(candidate.tag) } : undefined;
+          : { tag: policy?.interaction ?? inferInteractionLanguage(), source: "interaction" as const };
+  return { ...candidate, tag: validateLanguage(candidate.tag) };
 }
 
 function canonicalJson(value: unknown): string {
@@ -345,6 +349,31 @@ languageConfig
     output({ path: configPath(), language: policy });
   });
 
+config
+  .command("set-content-language <mode>")
+  .option("--lang <bcp47>")
+  .option("--initiative <id>")
+  .action(async (mode: string, options: { lang?: string; initiative?: string }) => {
+    const current = await readConfig();
+    const policy: LanguagePolicy = { ...(current.language ?? {}) };
+    if (mode === "interaction") {
+      delete policy.fixed;
+    } else if (mode === "fixed") {
+      if (!options.lang) throw new Error("fixed content language requires --lang <bcp47>.");
+      policy.fixed = validateLanguage(options.lang);
+    } else if (mode === "initiative") {
+      if (!options.lang) throw new Error("initiative content language requires --lang <bcp47>.");
+      const context = await resolveContext();
+      const id = options.initiative ?? context.initiativeId;
+      if (!id) throw new Error("initiative content language requires --initiative <id> or attached context.");
+      policy.initiatives = { ...(policy.initiatives ?? {}), [id]: validateLanguage(options.lang) };
+    } else {
+      throw new Error("Content language mode must be interaction, fixed, or initiative.");
+    }
+    await writeConfig({ ...current, language: policy });
+    output({ path: configPath(), content_language_mode: mode, language: policy });
+  });
+
 program
   .command("attach")
   .description("persist default Agent and initiative context")
@@ -455,6 +484,7 @@ submission
   .requiredOption("--summary <summary>")
   .option("--detail <detail>")
   .option("--detail-ref <ref>")
+  .option("--evidence <refs>", "comma-separated durable evidence references")
   .option("--initiative <id>")
   .option("--attention <policy>", "attention policy", "inbox")
   .option("--dedupe-key <key>")
@@ -462,7 +492,7 @@ submission
   .option("--question <question>", "required for decision_request")
   .option("--options <values>", "comma-separated decision options")
   .option("--risk <level>", "decision risk level", "low")
-  .action(async (options: { kind: SubmissionKind; title: string; summary: string; detail?: string; detailRef?: string; initiative?: string; attention: AttentionPolicy; dedupeKey?: string; observed?: boolean; question?: string; options?: string; risk: string }) => {
+  .action(async (options: { kind: SubmissionKind; title: string; summary: string; detail?: string; detailRef?: string; evidence?: string; initiative?: string; attention: AttentionPolicy; dedupeKey?: string; observed?: boolean; question?: string; options?: string; risk: string }) => {
     const context = await resolveContext();
     const decision = options.question ? { question: options.question, ...(options.options ? { options: commaList(options.options) } : {}), risk_level: options.risk } : undefined;
     await write({
@@ -477,6 +507,7 @@ submission
         summary: options.summary,
         ...(options.detail ? { detail: options.detail } : {}),
         ...(options.detailRef ? { detail_ref: options.detailRef } : {}),
+        ...(options.evidence ? { evidence_refs: commaList(options.evidence) } : {}),
         ...(options.initiative ?? context.initiativeId ? { initiative_id: options.initiative ?? context.initiativeId } : {}),
         attention_policy: options.attention,
         ...(options.dedupeKey ? { dedupe_key: options.dedupeKey } : {}),
@@ -511,9 +542,14 @@ function lifecycleCommand(
   name: "ready" | "wait" | "done",
   status: "active" | "waiting_for_jim" | "completed",
 ): void {
-  const command = program.command(`${name} [initiative-id]`).option("--next-step <step>");
+  const command = program.command(`${name} [initiative-id]`).option("--next-step <step>").option("--next <step>");
   if (name === "wait") {
-    command.option("--for <target>", "waiting target: jim or agent", "jim");
+    command
+      .option("--on <blocker>", "blocker: human, external, or failed")
+      .option("--for <target>", "legacy waiting target: jim or agent")
+      .option("--question <question>", "create a decision request while waiting for a human")
+      .option("--title <title>", "decision request title", "Decision needed")
+      .option("--attention <policy>", "decision request attention policy", "inbox");
   }
   if (name === "done") {
     command
@@ -524,21 +560,49 @@ function lifecycleCommand(
   command.action(
     async (
       id: string | undefined,
-      options: { nextStep?: string; for?: string; title?: string; summary?: string; attention?: AttentionPolicy },
+      options: { nextStep?: string; next?: string; for?: string; on?: "human" | "external" | "failed"; question?: string; title?: string; summary?: string; attention?: AttentionPolicy },
     ) => {
       const context = await resolveContext();
       const target = initiativeId(id, context);
-      const waitStatus = options.for === "agent" ? "waiting_for_agent" : status;
-      if (name === "wait" && options.for !== "jim" && options.for !== "agent") {
-        throw new Error("wait --for must be jim or agent.");
-      }
+      const nextAction = options.next ?? options.nextStep;
+      const blocker = name === "wait"
+        ? options.on ?? (options.for === "agent" ? "none" : "human")
+        : "none";
+      if (name === "wait" && options.for && !["jim", "agent"].includes(options.for)) throw new Error("wait --for must be jim or agent.");
+      if (name === "wait" && options.question && blocker !== "human") throw new Error("wait --question requires --on human.");
+      const waitStatus = name === "wait" && options.for === "agent" ? "waiting_for_agent" : status;
       const stateRequest: WriteRequest = {
         operation: `initiative.${name}`,
         path: `/api/v1/initiatives/${target}`,
         method: "PATCH",
-        body: { status: waitStatus, ...(options.nextStep ? { next_step: options.nextStep } : {}), actor: context.actor },
+        body: {
+          status: waitStatus,
+          lifecycle: name === "done" ? "done" : "open",
+          blocker,
+          owner: name === "done" || blocker !== "none" ? (blocker === "human" ? "human" : "none") : "agent",
+          ...(nextAction ? { next_step: nextAction, next_action: nextAction } : {}),
+          actor: context.actor,
+        },
       };
       if (name !== "done") {
+        if (name === "wait" && options.question) {
+          await write({
+            operation: "initiative.wait.decision",
+            path: "/api/v1/submissions",
+            method: "POST",
+            idempotent: true,
+            submission: true,
+            body: {
+              kind: "decision_request",
+              title: options.title ?? "Decision needed",
+              summary: options.question,
+              initiative_id: target,
+              attention_policy: options.attention ?? "inbox",
+              decision: { question: options.question, risk_level: "low" },
+              actor: context.actor,
+            },
+          }, context, false);
+        }
         await write(stateRequest, context);
         return;
       }
@@ -550,18 +614,19 @@ function lifecycleCommand(
           idempotent: true,
           submission: true,
           body: {
-            kind: "progress_update",
+            kind: "delivery",
             title: options.title ?? "Initiative completed",
             summary: options.summary ?? `Initiative ${target} has been marked complete.`,
             initiative_id: target,
             attention_policy: options.attention ?? "record_only",
+            initiative_update: { lifecycle: "done", blocker: "none", owner: "none", ...(nextAction ? { next_action: nextAction } : {}) },
             actor: context.actor,
           },
         },
         context,
         false,
       );
-      const state = await write(stateRequest, context, false);
+      const state = await request(`/api/v1/initiatives/${target}`);
       output({ delivery, state });
     },
   );
@@ -571,8 +636,48 @@ lifecycleCommand("ready", "active");
 lifecycleCommand("wait", "waiting_for_jim");
 lifecycleCommand("done", "completed");
 
-program.command("sync").description("read the active context's workboard and decisions").action(async () => {
+program.command("sync").description("record an event and its projected state, or inspect attached context")
+  .option("--event <event>")
+  .option("--title <title>")
+  .option("--summary <summary>")
+  .option("--status <status>", "ready, waiting, or done")
+  .option("--next <action>")
+  .option("--on <blocker>", "human, external, or failed")
+  .option("--evidence <refs>")
+  .option("--attention <policy>", "attention policy", "record_only")
+  .option("--observed")
+  .action(async (options: { event?: string; title?: string; summary?: string; status?: "ready" | "waiting" | "done"; next?: string; on?: "human" | "external" | "failed"; evidence?: string; attention: AttentionPolicy; observed?: boolean }) => {
   const context = await resolveContext();
+  if (options.event || options.summary) {
+    const target = initiativeId(undefined, context);
+    const status = options.status ?? "ready";
+    const blocker = status === "waiting" ? options.on ?? "external" : "none";
+    const owner = status === "done" || blocker !== "none" ? (blocker === "human" ? "human" : "none") : "agent";
+    await write({
+      operation: "initiative.sync",
+      path: "/api/v1/submissions",
+      method: "POST",
+      idempotent: true,
+      submission: true,
+      body: {
+        kind: status === "done" ? "delivery" : "progress_update",
+        title: options.title ?? options.event ?? "Initiative synchronized",
+        summary: options.summary ?? options.event ?? "Initiative state synchronized.",
+        initiative_id: target,
+        attention_policy: options.attention,
+        ...(options.evidence ? { evidence_refs: commaList(options.evidence) } : {}),
+        ...(options.observed ? { observed: true } : {}),
+        initiative_update: {
+          lifecycle: status === "done" ? "done" : "open",
+          blocker,
+          owner,
+          ...(options.next ? { next_action: options.next } : {}),
+        },
+        actor: context.actor,
+      },
+    }, context);
+    return;
+  }
   const [workboard, decisions] = await Promise.all([
     request("/api/v1/workboard"),
     context.initiativeId ? request(`/api/v1/decisions?initiative_id=${encodeURIComponent(context.initiativeId)}`) : Promise.resolve(undefined),
@@ -583,13 +688,15 @@ program.command("sync").description("read the active context's workboard and dec
 program.command("verify-complete [initiative-id]").description("verify an initiative is completed with no unresolved decisions").action(async (id: string | undefined) => {
   const context = await resolveContext();
   const target = initiativeId(id, context);
-  const [item, decisions] = await Promise.all([
+  const [item, decisions, submissions] = await Promise.all([
     request<{ status?: string }>(`/api/v1/initiatives/${target}`),
     request<Array<{ id: string; status: string }>>(`/api/v1/decisions?initiative_id=${encodeURIComponent(target)}`),
+    request<Array<{ kind: string }>>(`/api/v1/submissions?initiative_id=${encodeURIComponent(target)}`),
   ]);
   const unresolved = decisions.filter((entry) => !["resolved", "expired", "superseded"].includes(entry.status));
-  const complete = item.status === "completed" && unresolved.length === 0;
-  output({ initiative_id: target, complete, checks: { initiative_status: item.status, unresolved_decisions: unresolved } });
+  const deliveries = submissions.filter((entry) => entry.kind === "delivery");
+  const complete = item.status === "completed" && unresolved.length === 0 && deliveries.length > 0;
+  output({ initiative_id: target, complete, checks: { initiative_status: item.status, unresolved_decisions: unresolved, deliveries: deliveries.length } });
   if (!complete) process.exitCode = 2;
 });
 
