@@ -53,4 +53,14 @@ describe("harness integrations", () => {
       expect((await integrationStatus(harness, directory)).installed).toBe(false);
     }
   });
+
+  it("installs a managed Codex Skill without changing Codex itself", async () => {
+    const directory = await root();
+    const installed = await installIntegration("codex", directory);
+    expect(installed.installed).toBe(true);
+    expect(installed.target).toBe(join(directory, ".codex", "skills", "threadline-gateway"));
+    expect(await readFile(join(installed.target!, "SKILL.md"), "utf8")).toContain("Threadline Gateway");
+    await removeIntegration("codex", directory);
+    expect((await integrationStatus("codex", directory)).installed).toBe(false);
+  });
 });

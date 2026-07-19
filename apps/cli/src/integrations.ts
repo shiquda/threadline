@@ -1,6 +1,7 @@
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const harnesses = ["codex", "claude-code", "opencode", "openclaw"] as const;
 export type Harness = (typeof harnesses)[number];
@@ -12,12 +13,18 @@ export type IntegrationStatus = {
   detail: string;
 };
 
+const managedMarker = ".threadline-integration.json";
+
 function home(root?: string): string {
   return root ?? process.env.THREADLINE_INTEGRATION_HOME ?? homedir();
 }
 
 function claudeSettings(root?: string): string {
   return join(home(root), ".claude", "settings.json");
+}
+
+function codexSkill(root?: string): string {
+  return join(home(root), ".codex", "skills", "threadline-gateway");
 }
 
 function openCodePlugin(root?: string): string {
@@ -37,6 +44,36 @@ async function writeAtomically(path: string, content: string): Promise<void> {
   const temporary = `${path}.threadline-${process.pid}.tmp`;
   await writeFile(temporary, content, { encoding: "utf8", mode: 0o600 });
   await rename(temporary, path);
+}
+
+async function skillSource(): Promise<string> {
+  const candidates = [
+    process.env.THREADLINE_SKILL_SOURCE,
+    resolve(process.cwd(), "skills", "threadline-gateway"),
+    resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "skills", "threadline-gateway"),
+  ].filter((path): path is string => Boolean(path));
+  for (const candidate of candidates) {
+    if (await exists(join(candidate, "SKILL.md"))) return candidate;
+  }
+  throw new Error("Threadline Skill source was not found. Set THREADLINE_SKILL_SOURCE to the threadline-gateway Skill directory.");
+}
+
+async function installCodexSkill(root?: string, dryRun = false): Promise<string> {
+  const target = codexSkill(root);
+  const source = await skillSource();
+  if (dryRun) return target;
+  const marker = join(target, managedMarker);
+  if (await exists(target) && !await exists(marker)) {
+    throw new Error(`Refusing to replace unmanaged Codex Skill at ${target}. Remove it manually or add it through Threadline first.`);
+  }
+  const temporary = `${target}.threadline-${process.pid}.tmp`;
+  await rm(temporary, { recursive: true, force: true });
+  await mkdir(dirname(target), { recursive: true });
+  await cp(source, temporary, { recursive: true });
+  await writeFile(join(temporary, managedMarker), `${JSON.stringify({ harness: "codex", managed_by: "threadline" })}\n`, "utf8");
+  await rm(target, { recursive: true, force: true });
+  await rename(temporary, target);
+  return target;
 }
 
 type ClaudeHook = { type?: unknown; command?: unknown; [key: string]: unknown };
@@ -95,11 +132,13 @@ export function isHarness(value: string): value is Harness {
 
 export async function integrationStatus(harness: Harness, root?: string): Promise<IntegrationStatus> {
   if (harness === "codex") {
+    const target = codexSkill(root);
+    const installed = await exists(join(target, "SKILL.md"));
     return {
       harness,
-      installed: Boolean(process.env.CODEX_THREAD_ID || process.env.CODEX_SESSION_ID),
-      target: null,
-      detail: "Codex is detected directly through CODEX_THREAD_ID (with CODEX_SESSION_ID compatibility).",
+      installed,
+      target,
+      detail: `${installed ? "Threadline Skill is installed" : "Threadline Skill is not installed"}; native IDs use CODEX_THREAD_ID (with CODEX_SESSION_ID compatibility).`,
     };
   }
   const target = harness === "claude-code" ? claudeSettings(root) : harness === "opencode" ? openCodePlugin(root) : openClawPlugin(root);
@@ -120,7 +159,11 @@ export async function integrationStatus(harness: Harness, root?: string): Promis
 }
 
 export async function installIntegration(harness: Harness, root?: string, dryRun = false): Promise<IntegrationStatus> {
-  if (harness === "codex") return integrationStatus(harness, root);
+  if (harness === "codex") {
+    const target = await installCodexSkill(root, dryRun);
+    const result = await integrationStatus(harness, root);
+    return { ...result, installed: dryRun ? result.installed : true, target, detail: dryRun ? `Would install Threadline Skill at ${target}.` : "Threadline Skill is installed; Codex IDs are detected directly." };
+  }
   const target = harness === "claude-code" ? claudeSettings(root) : harness === "opencode" ? openCodePlugin(root) : openClawPlugin(root);
   if (harness === "claude-code") {
     const current = await exists(target) ? readClaudeSettings(await readFile(target, "utf8")) : {};
@@ -133,7 +176,14 @@ export async function installIntegration(harness: Harness, root?: string, dryRun
 }
 
 export async function removeIntegration(harness: Harness, root?: string, dryRun = false): Promise<IntegrationStatus> {
-  if (harness === "codex") return { harness, installed: false, target: null, detail: "Codex uses direct environment detection and has no managed adapter." };
+  if (harness === "codex") {
+    const target = codexSkill(root);
+    if (await exists(target) && !await exists(join(target, managedMarker))) {
+      throw new Error(`Refusing to remove unmanaged Codex Skill at ${target}.`);
+    }
+    if (!dryRun) await rm(target, { recursive: true, force: true });
+    return { harness, installed: false, target, detail: dryRun ? `Would remove Threadline Skill at ${target}.` : "Threadline Skill is removed; direct native-ID detection remains available." };
+  }
   const target = harness === "claude-code" ? claudeSettings(root) : harness === "opencode" ? openCodePlugin(root) : openClawPlugin(root);
   if (harness === "claude-code" && await exists(target)) {
     const current = readClaudeSettings(await readFile(target, "utf8"));
