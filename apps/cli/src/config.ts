@@ -5,6 +5,29 @@ import { dirname, join } from "node:path";
 export interface CliConfig {
   url?: string;
   token?: string;
+  context?: PersistedContext;
+  language?: LanguagePolicy;
+}
+
+export interface PersistedContext {
+  actorType?: "human" | "agent" | "system";
+  actorName?: string;
+  source?: string;
+  runtime?: string;
+  agent?: string;
+  sessionId?: string;
+  initiativeId?: string;
+}
+
+export interface LanguagePolicy {
+  /** The language inherited from the active user interaction. */
+  interaction?: string;
+  /** The workspace-wide language selected by the user. */
+  fixed?: string;
+  /** Per-session overrides, keyed by Threadline session ID. */
+  sessions?: Record<string, string>;
+  /** Per-initiative overrides, keyed by Threadline initiative ID. */
+  initiatives?: Record<string, string>;
 }
 
 export function configPath(): string {
