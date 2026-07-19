@@ -46,10 +46,14 @@ describe("Threadline CLI", () => {
     };
     if (useRuntimeEnvironment) {
       env.THREADLINE_RUNTIME = "codex";
+      env.THREADLINE_ACTOR_HOST = "cli-host";
+      env.THREADLINE_TOOL = "codex";
       env.THREADLINE_AGENT = "cli-agent";
       env.THREADLINE_SESSION_ID = "cli-session";
     } else {
       delete env.THREADLINE_RUNTIME;
+      delete env.THREADLINE_ACTOR_HOST;
+      delete env.THREADLINE_TOOL;
       delete env.THREADLINE_AGENT;
       delete env.THREADLINE_SESSION_ID;
     }
@@ -89,10 +93,10 @@ describe("Threadline CLI", () => {
     ])) as { decision: { id: string } };
 
     const inbox = (await run(["inbox", "list"])) as Array<{
-      submission: { session_id: string };
+      submission: { host: string; tool: string; session_id: string };
     }>;
     expect(inbox).toHaveLength(1);
-    expect(inbox[0]?.submission.session_id).toBe("cli-session");
+    expect(inbox[0]?.submission).toMatchObject({ host: "cli-host", tool: "codex", session_id: "cli-session" });
 
     const resolved = (await run([
       "decision",
@@ -140,6 +144,7 @@ describe("Threadline CLI", () => {
       "The attached defaults are used.",
     ], false)) as { submission: { runtime: string; agent: string; session_id: string; initiative_id: string } };
     expect(created.submission).toMatchObject({
+      tool: "codex",
       runtime: "codex",
       agent: "attached-agent",
       session_id: "attached-session",
@@ -190,6 +195,65 @@ describe("Threadline CLI", () => {
       "The configured session language is stored with this fact.",
     ], false)) as { submission: { content_language: string } };
     expect(localized.submission.content_language).toBe("ja-JP");
+  });
+
+  it("filters submissions by host, tool, and session without fabricating a session", async () => {
+    const first = (await run([
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "First identity",
+      "--summary",
+      "Written by the configured CLI identity.",
+      "--attention",
+      "record_only",
+    ])) as { submission: { id: string } };
+    await run([
+      "--host",
+      "other-host",
+      "--tool",
+      "other-tool",
+      "--session",
+      "other-session",
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "Other identity",
+      "--summary",
+      "Must not match the configured identity filter.",
+      "--attention",
+      "record_only",
+    ]);
+
+    const filtered = (await run([
+      "submission",
+      "list",
+      "--host",
+      "cli-host",
+      "--tool",
+      "codex",
+      "--session",
+      "cli-session",
+    ])) as Array<{ id: string }>;
+    expect(filtered).toEqual(expect.arrayContaining([expect.objectContaining({ id: first.submission.id })]));
+    expect(filtered).not.toEqual(expect.arrayContaining([expect.objectContaining({ title: "Other identity" })]));
+
+    const noSession = (await run([
+      "--dry-run",
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "No invented session",
+      "--summary",
+      "An absent session remains absent.",
+    ], false)) as { context: { session_id?: string } };
+    expect(noSession.context.session_id).toBeUndefined();
   });
 
   it("explains deterministic dry-run writes and completion records delivery plus state", async () => {

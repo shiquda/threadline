@@ -12,6 +12,8 @@ export interface CliConfig {
 export interface PersistedContext {
   actorType?: "human" | "agent" | "system";
   actorName?: string;
+  host?: string;
+  tool?: string;
   source?: string;
   runtime?: string;
   agent?: string;

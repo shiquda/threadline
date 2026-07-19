@@ -40,6 +40,13 @@ export interface CreateSubmissionOutcome {
   created: boolean;
 }
 
+export interface SubmissionFilters {
+  initiative_id?: string;
+  host?: string;
+  tool?: string;
+  session_id?: string;
+}
+
 export class StoreError extends Error {
   constructor(
     public readonly code: "not_found" | "conflict" | "invalid_request",
@@ -286,6 +293,8 @@ export class ThreadlineStore {
         initiative_id: input.initiative_id ?? null,
         attention_policy: input.attention_policy,
         dedupe_key: input.dedupe_key ?? null,
+        host: input.actor.host ?? null,
+        tool: input.actor.tool ?? input.actor.runtime ?? null,
         source: sourceFor(input.actor),
         runtime: input.actor.runtime ?? null,
         agent: input.actor.agent ?? null,
@@ -299,10 +308,10 @@ export class ThreadlineStore {
           `INSERT INTO submissions
            (id, kind, title, summary, detail, detail_ref, content_language, evidence_refs_json,
             initiative_id, attention_policy,
-            dedupe_key, source, runtime, agent, session_id, observed_at, created_at, created_by)
+            dedupe_key, host, tool, source, runtime, agent, session_id, observed_at, created_at, created_by)
            VALUES (@id, @kind, @title, @summary, @detail, @detail_ref, @content_language,
-                   @evidence_refs_json, @initiative_id, @attention_policy, @dedupe_key, @source,
-                   @runtime, @agent, @session_id, @observed_at, @created_at, @created_by)`,
+                   @evidence_refs_json, @initiative_id, @attention_policy, @dedupe_key, @host,
+                   @tool, @source, @runtime, @agent, @session_id, @observed_at, @created_at, @created_by)`,
         )
         .run({ ...submission, evidence_refs_json: JSON.stringify(submission.evidence_refs) });
 
@@ -446,15 +455,22 @@ export class ThreadlineStore {
     return this.mapSubmission(row);
   }
 
-  listSubmissions(initiativeId?: string): Submission[] {
-    if (initiativeId) {
-      return (
-        this.db
-          .prepare("SELECT * FROM submissions WHERE initiative_id = ? ORDER BY created_at DESC")
-          .all(initiativeId) as SubmissionRow[]
-      ).map((row) => this.mapSubmission(row));
+  listSubmissions(initiativeId?: string): Submission[];
+  listSubmissions(filters?: SubmissionFilters): Submission[];
+  listSubmissions(filtersOrInitiativeId: SubmissionFilters | string = {}): Submission[] {
+    const filters = typeof filtersOrInitiativeId === "string"
+      ? { initiative_id: filtersOrInitiativeId }
+      : filtersOrInitiativeId;
+    const clauses: string[] = [];
+    const values: string[] = [];
+    for (const [column, value] of Object.entries(filters)) {
+      if (value) {
+        clauses.push(`${column} = ?`);
+        values.push(value);
+      }
     }
-    return (this.db.prepare("SELECT * FROM submissions ORDER BY created_at DESC").all() as SubmissionRow[])
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    return (this.db.prepare(`SELECT * FROM submissions${where} ORDER BY created_at DESC`).all(...values) as SubmissionRow[])
       .map((row) => this.mapSubmission(row));
   }
 
@@ -814,9 +830,9 @@ export class ThreadlineStore {
     this.db
       .prepare(
         `INSERT INTO audit_events
-         (id, entity_type, entity_id, event_type, actor_type, actor_name, source, runtime,
+         (id, entity_type, entity_id, event_type, actor_type, actor_name, host, tool, source, runtime,
           agent, session_id, payload_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         randomUUID(),
@@ -825,6 +841,8 @@ export class ThreadlineStore {
         eventType,
         actor.actor_type,
         actor.actor_name,
+        actor.host ?? null,
+        actor.tool ?? actor.runtime ?? null,
         actor.source ?? null,
         actor.runtime ?? null,
         actor.agent ?? null,

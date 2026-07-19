@@ -149,6 +149,21 @@ const migrations = [
       CREATE INDEX idx_task_submission_links_submission ON task_submission_links(submission_id, task_id);
     `,
   },
+  {
+    version: 4,
+    sql: `
+      ALTER TABLE submissions ADD COLUMN host TEXT;
+      ALTER TABLE submissions ADD COLUMN tool TEXT;
+      ALTER TABLE audit_events ADD COLUMN host TEXT;
+      ALTER TABLE audit_events ADD COLUMN tool TEXT;
+
+      UPDATE submissions SET tool = runtime WHERE tool IS NULL AND runtime IS NOT NULL;
+      UPDATE audit_events SET tool = runtime WHERE tool IS NULL AND runtime IS NOT NULL;
+
+      CREATE INDEX idx_submissions_identity
+        ON submissions(host, tool, session_id, created_at DESC);
+    `,
+  },
 ] as const;
 
 export function migrate(db: Database.Database): void {

@@ -61,7 +61,7 @@ threadline --version
 
 Install `skills/threadline-gateway/` into the Agent environment's standard Skills directory. For Codex, copy that folder to `$CODEX_HOME/skills/threadline-gateway/` (or `~/.codex/skills/threadline-gateway/` when `CODEX_HOME` is unset). Other Agent Skills-compatible environments can install the same folder without rewriting its instructions.
 
-Configure `THREADLINE_URL`, `THREADLINE_TOKEN`, `THREADLINE_RUNTIME`, `THREADLINE_AGENT`, and `THREADLINE_SESSION_ID` in the Agent environment. The Skill itself does not run a daemon or poll the Gateway.
+Configure `THREADLINE_URL`, `THREADLINE_TOKEN`, `THREADLINE_TOOL`, and `THREADLINE_SESSION_ID` in the Agent environment. The CLI collects the current machine hostname automatically (or accepts `THREADLINE_ACTOR_HOST`), and `THREADLINE_RUNTIME` remains supported as a legacy fallback for `tool`. The Skill itself does not run a daemon or poll the Gateway.
 
 ## Docker deployment
 

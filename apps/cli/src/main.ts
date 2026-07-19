@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { hostname } from "node:os";
 import type { ActorContext, AttentionPolicy, SubmissionKind, Task } from "@threadline/protocol";
 import { Command, Option } from "commander";
 import { ApiError, request } from "./client.js";
@@ -18,6 +19,8 @@ interface GlobalOptions {
   explain?: boolean;
   actorType?: "human" | "agent" | "system";
   actorName?: string;
+  host?: string;
+  tool?: string;
   source?: string;
   runtime?: string;
   agent?: string;
@@ -63,8 +66,10 @@ program
   .option("--explain", "include resolved context and request details in write output")
   .addOption(new Option("--actor-type <type>").choices(["human", "agent", "system"]))
   .option("--actor-name <name>", "audit actor name")
+  .option("--host <host>", "execution host (defaults to this machine)")
+  .option("--tool <tool>", "Agent tool name")
   .option("--source <source>", "originating integration")
-  .option("--runtime <runtime>", "Agent runtime name")
+  .option("--runtime <runtime>", "legacy Agent runtime name; falls back to tool")
   .option("--agent <agent>", "Agent name")
   .option("--session <id>", "Agent session ID")
   .option("--initiative <id>", "default initiative for this command")
@@ -98,6 +103,8 @@ async function resolveContext(): Promise<ResolvedContext> {
   const config = await readConfig();
   const persisted = config.context ?? {};
   const runtime = firstDefined(options.runtime, process.env.THREADLINE_RUNTIME, persisted.runtime, detectRuntime());
+  const tool = firstDefined(options.tool, process.env.THREADLINE_TOOL, persisted.tool, runtime);
+  const host = firstDefined(options.host, process.env.THREADLINE_ACTOR_HOST, persisted.host, hostname());
   const agent = firstDefined(options.agent, process.env.THREADLINE_AGENT, persisted.agent);
   const sessionId = firstDefined(
     options.session,
@@ -132,6 +139,8 @@ async function resolveContext(): Promise<ResolvedContext> {
     actor: {
       actor_type: actorType ?? "human",
       actor_name: actorName ?? "threadline-cli",
+      ...(host ? { host } : {}),
+      ...(tool ? { tool } : {}),
       ...(source ? { source } : {}),
       ...(runtime ? { runtime } : {}),
       ...(agent ? { agent } : {}),
@@ -379,6 +388,8 @@ program
   .description("persist default Agent and initiative context")
   .addOption(new Option("--actor-type <type>").choices(["human", "agent", "system"]))
   .option("--actor-name <name>")
+  .option("--host <host>")
+  .option("--tool <tool>")
   .option("--source <source>")
   .option("--runtime <runtime>")
   .option("--agent <agent>")
@@ -391,6 +402,8 @@ program
     const context: PersistedContext = { ...(options.clear ? {} : current.context ?? {}) };
     const actorType = firstDefined(options.actorType, global.actorType);
     const actorName = firstDefined(options.actorName, global.actorName);
+    const host = firstDefined(options.host, global.host);
+    const tool = firstDefined(options.tool, global.tool);
     const source = firstDefined(options.source, global.source);
     const runtime = firstDefined(options.runtime, global.runtime);
     const agent = firstDefined(options.agent, global.agent);
@@ -398,6 +411,8 @@ program
     const initiativeId = firstDefined(options.initiativeId, options.initiative, global.initiative);
     if (actorType) context.actorType = actorType;
     if (actorName) context.actorName = actorName;
+    if (host) context.host = host;
+    if (tool) context.tool = tool;
     if (source) context.source = source;
     if (runtime) context.runtime = runtime;
     if (agent) context.agent = agent;
@@ -570,7 +585,23 @@ submission
 submission
   .command("list")
   .option("--initiative <id>")
-  .action(async (options: { initiative?: string }) => output(await request(`/api/v1/submissions${options.initiative ? `?initiative_id=${encodeURIComponent(options.initiative)}` : ""}`)));
+  .option("--host <host>")
+  .option("--tool <tool>")
+  .option("--session <id>")
+  .action(async (options: { initiative?: string; host?: string; tool?: string; session?: string }) => {
+    const global = globalOptions();
+    const query = new URLSearchParams();
+    const initiative = firstDefined(options.initiative, global.initiative);
+    const host = firstDefined(options.host, global.host);
+    const tool = firstDefined(options.tool, global.tool);
+    const session = firstDefined(options.session, global.session);
+    if (initiative) query.set("initiative_id", initiative);
+    if (host) query.set("host", host);
+    if (tool) query.set("tool", tool);
+    if (session) query.set("session_id", session);
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    output(await request(`/api/v1/submissions${suffix}`));
+  });
 submission.command("get <id>").action(async (id: string) => output(await request(`/api/v1/submissions/${id}`)));
 
 const decision = program.command("decision").description("read and resolve decisions");

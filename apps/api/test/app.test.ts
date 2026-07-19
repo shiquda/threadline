@@ -9,6 +9,8 @@ const authorization = { authorization: `Bearer ${token}` };
 const actor = {
   actor_type: "agent" as const,
   actor_name: "builder",
+  host: "wdc-vps",
+  tool: "codex",
   source: "codex",
   runtime: "codex",
   agent: "builder",
@@ -263,6 +265,42 @@ describe("Threadline API decision loop", () => {
       headers: authorization,
     });
     expect(inbox.json()).toEqual([]);
+  });
+
+  it("filters submissions by canonical host, tool, and session identity", async () => {
+    const canonical = await app.inject({
+      method: "POST",
+      url: "/api/v1/submissions",
+      headers: authorization,
+      payload: {
+        kind: "delivery",
+        title: "Canonical identity",
+        summary: "Use the canonical execution identity.",
+        attention_policy: "record_only",
+        actor,
+      },
+    });
+    const other = await app.inject({
+      method: "POST",
+      url: "/api/v1/submissions",
+      headers: authorization,
+      payload: {
+        kind: "delivery",
+        title: "Other identity",
+        summary: "Must not match the canonical filter.",
+        attention_policy: "record_only",
+        actor: { ...actor, host: "laptop", tool: "claude-code", session_id: "session-99" },
+      },
+    });
+
+    const filtered = await app.inject({
+      method: "GET",
+      url: "/api/v1/submissions?host=wdc-vps&tool=codex&session_id=session-42",
+      headers: authorization,
+    });
+    expect(filtered.statusCode).toBe(200);
+    expect(filtered.json()).toMatchObject([{ id: canonical.json<{ submission: { id: string } }>().submission.id, host: "wdc-vps", tool: "codex" }]);
+    expect(filtered.json()).not.toMatchObject([{ id: other.json<{ submission: { id: string } }>().submission.id }]);
   });
 
   it("delivers alerts without allowing an outbound failure to change the API result", async () => {

@@ -54,6 +54,9 @@ const InitiativeQuerySchema = Type.Object({
 });
 const SubmissionQuerySchema = Type.Object({
   initiative_id: Type.Optional(Type.String()),
+  host: Type.Optional(Type.String()),
+  tool: Type.Optional(Type.String()),
+  session_id: Type.Optional(Type.String()),
 });
 const TaskQuerySchema = Type.Object({ initiative_id: Type.String() });
 const DecisionQuerySchema = Type.Object({
@@ -291,8 +294,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     "/api/v1/submissions",
     { schema: { querystring: SubmissionQuerySchema } },
     async (request) => {
-      const query = request.query as { initiative_id?: string };
-      return options.store.listSubmissions(query.initiative_id);
+      const query = request.query as { initiative_id?: string; host?: string; tool?: string; session_id?: string };
+      return options.store.listSubmissions(query);
     },
   );
 

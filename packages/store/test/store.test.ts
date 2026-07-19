@@ -1,4 +1,8 @@
+import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ThreadlineStore } from "../src/index.js";
 
 const actor = { actor_type: "agent" as const, actor_name: "builder" };
@@ -112,5 +116,67 @@ describe("ThreadlineStore core initiative projection", () => {
       attention_policy: "record_only", actor,
     }).submission;
     expect(() => store.linkTaskSubmission(task.id, unrelated.id, actor)).toThrow("same Initiative");
+  });
+});
+
+describe("ThreadlineStore execution identity", () => {
+  it("backfills tool from legacy runtime without inventing a host", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "threadline-migration-"));
+    const filename = join(directory, "legacy.sqlite");
+    const database = new Database(filename);
+    database.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      INSERT INTO schema_migrations VALUES (1, '2026-07-19T00:00:00.000Z');
+      INSERT INTO schema_migrations VALUES (2, '2026-07-19T00:00:00.000Z');
+      CREATE TABLE submissions (runtime TEXT, session_id TEXT, created_at TEXT);
+      CREATE TABLE audit_events (runtime TEXT);
+      INSERT INTO submissions(runtime) VALUES ('codex');
+      INSERT INTO audit_events VALUES ('claude-code');
+    `);
+    database.close();
+
+    const store = new ThreadlineStore(filename);
+    store.close();
+
+    const migrated = new Database(filename, { readonly: true });
+    expect(migrated.prepare("SELECT host, tool FROM submissions").get()).toEqual({ host: null, tool: "codex" });
+    expect(migrated.prepare("SELECT host, tool FROM audit_events").get()).toEqual({ host: null, tool: "claude-code" });
+    migrated.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it("stores and filters canonical host, tool, and session identity", () => {
+    const store = new ThreadlineStore(":memory:");
+    const canonicalActor = {
+      actor_type: "agent" as const,
+      actor_name: "builder",
+      host: "wdc-vps",
+      tool: "codex",
+      session_id: "session-a",
+    };
+    const otherActor = { ...canonicalActor, host: "laptop", tool: "claude-code", session_id: "session-b" };
+    const canonical = store.createSubmission({
+      kind: "delivery",
+      title: "Canonical identity",
+      summary: "Stored with host, tool, and session.",
+      attention_policy: "record_only",
+      actor: canonicalActor,
+    }).submission;
+    store.createSubmission({
+      kind: "delivery",
+      title: "Other identity",
+      summary: "Must not match the canonical filter.",
+      attention_policy: "record_only",
+      actor: otherActor,
+    });
+
+    expect(canonical).toMatchObject({ host: "wdc-vps", tool: "codex", session_id: "session-a" });
+    expect(store.listSubmissions({ host: "wdc-vps", tool: "codex", session_id: "session-a" }))
+      .toMatchObject([{ id: canonical.id }]);
+    expect(store.listEvents()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ host: "laptop", tool: "claude-code", session_id: "session-b" }),
+      expect.objectContaining({ host: "wdc-vps", tool: "codex", session_id: "session-a" }),
+    ]));
+    store.close();
   });
 });
