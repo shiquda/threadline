@@ -4,13 +4,13 @@ import {
   Archive, Check, ChevronRight, ClipboardList, Clock3, Copy, Inbox,
   LayoutDashboard, Menu, Network, Plus, RefreshCw, Scale, Settings2, X,
 } from "lucide-react";
-import type { AuditEvent, Decision, InboxItem, Initiative, InitiativeStatus, Submission, Workboard } from "@threadline/protocol";
+import type { AuditEvent, Decision, InboxItem, Initiative, InitiativeStatus, Submission, Task, Workboard } from "@threadline/protocol";
 import { ThreadlineApi, readConnection, writeConnection, type Connection } from "./api.js";
 import { formatDate, formatExactDate, humanize, I18nProvider, supportedLocales, useI18n, type Locale } from "./i18n.js";
 import { initiativeRecord, normalizeWorkboard, type InitiativeRecord } from "./workboard.js";
 import "./styles.css";
 
-type Page = "overview" | "inbox" | "workboard" | "decisions" | "initiative" | "decision" | "submission";
+type Page = "overview" | "inbox" | "workboard" | "decisions" | "initiative" | "decision" | "submission" | "task";
 type Route = { page: Page; id?: string };
 type LoadState<T> = { value: T | null; loading: boolean; error: string | null; refreshing: boolean; refreshError: string | null };
 type LoadResult<T> = LoadState<T> & { reload: () => void; mutate: (updater: (value: T) => T) => void };
@@ -21,6 +21,7 @@ function routeFromHash(): Route {
   if (page === "initiative" && id) return { page: "initiative", id };
   if (page === "decision" && id) return { page: "decision", id };
   if (page === "submission" && id) return { page: "submission", id };
+  if (page === "task" && id) return { page: "task", id };
   if (page && ["inbox", "workboard", "decisions"].includes(page)) return { page: page as Page };
   return { page: "overview" };
 }
@@ -235,7 +236,7 @@ function App() {
     return () => window.removeEventListener("hashchange", update);
   }, []);
 
-  const pageTitle = route.page === "overview" ? t("Overview") : route.page === "initiative" ? t("Initiative detail") : route.page === "decision" ? t("Decision detail") : route.page === "submission" ? t("Submission detail") : localizedValue(t, route.page);
+  const pageTitle = route.page === "overview" ? t("Overview") : route.page === "initiative" ? t("Initiative detail") : route.page === "decision" ? t("Decision detail") : route.page === "submission" ? t("Submission detail") : route.page === "task" ? t("Task") : localizedValue(t, route.page);
   const saveConnection = (next: Connection) => { writeConnection(next); setConnection(next); setShowConnection(false); };
 
   return <div className="app-shell">
@@ -258,6 +259,7 @@ function App() {
       {route.page === "initiative" && route.id && <InitiativeDetail api={api} id={route.id} />}
       {route.page === "decision" && route.id && <DecisionDetail api={api} id={route.id} />}
       {route.page === "submission" && route.id && <SubmissionDetail api={api} id={route.id} />}
+      {route.page === "task" && route.id && <TaskDetail api={api} id={route.id} />}
     </main>
     {showConnection && <ConnectionDialog current={connection} onClose={() => setShowConnection(false)} onSave={saveConnection} />}
     {showNewInitiative && <NewInitiativeDialog api={api} onClose={() => setShowNewInitiative(false)} />}
@@ -413,17 +415,56 @@ function DecisionsPage({ api }: { api: ThreadlineApi }) {
 
 function InitiativeDetail({ api, id }: { api: ThreadlineApi; id: string }) {
   const { locale, t } = useI18n();
-  const data = useLoad("initiative", (signal) => Promise.all([api.initiative(id, signal), api.submissions(id, signal), api.decisions(signal), api.events("initiative", id, signal)]), [api, id]);
+  const data = useLoad("initiative", (signal) => Promise.all([api.initiative(id, signal), api.submissions(id, signal), api.tasks(id, signal), api.decisions(signal), api.events("initiative", id, signal)]), [api, id]);
   const [saving, setSaving] = useState(false);
   if (data.loading && !data.value) return <DetailSkeleton />;
   if (data.error && !data.value) return <StateBox title={t("Could not load initiative")} retry={data.reload}>{localizedError(t, data.error)}</StateBox>;
   if (!data.value) return null;
-  const [initiative, submissions, allDecisions, events] = data.value;
+  const [initiative, submissions, tasks, allDecisions, events] = data.value;
   const decisions = allDecisions.filter((decision) => decision.initiative_id === id);
   const updateStatus = async (status: InitiativeStatus) => { setSaving(true); try { await api.updateInitiative(id, { status }); data.reload(); } finally { setSaving(false); } };
   return <PageHeader title={initiative.title} subtitle={`${t("Initiative")} · ${displayStatus(t, initiative.status)}`} action={<a className="btn btn-secondary btn-sm" href="#workboard">{t("Back to Workboard")}</a>}>
     <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
-    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Intent")}><p className="detail-copy">{initiative.intent}</p></DetailSection><DetailSection title={t("Next step")}><p className="detail-copy">{initiative.next_step ?? t("No next step recorded")}</p></DetailSection><DetailSection title={t("Submissions")}>{submissions.length ? <ol className="submission-timeline">{submissions.map((submission) => <SubmissionRow key={submission.id} submission={submission} />)}</ol> : <p className="text-muted">{t("No submissions are linked yet.")}</p>}</DetailSection><DetailSection title={t("Decisions")}>{decisions.length ? <div className="linked-list">{decisions.map((decision) => <a href={`#decision/${decision.id}`} className="linked-row" key={decision.id}><div><strong>{decision.question}</strong><span>{decision.resolution ?? t("Awaiting a decision")}</span></div><Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge></a>)}</div> : <p className="text-muted">{t("No decisions are linked yet.")}</p>}</DetailSection><DetailSection title={t("Activity")}><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><div className="field"><label htmlFor="initiative-status">{t("Status")}</label><select id="initiative-status" value={initiative.status} disabled={saving} onChange={(event) => void updateStatus(event.target.value as InitiativeStatus)}>{["active", "waiting_for_jim", "waiting_for_agent", "paused", "completed", "cancelled"].map((value) => <option value={value} key={value}>{displayStatus(t, value)}</option>)}</select></div><Properties rows={[[t("ID"), initiative.id], [t("Created by"), initiative.created_by], [t("Last activity"), formatDate(locale, initiative.last_activity_at)], [t("Created"), formatDate(locale, initiative.created_at)]]} /></div></aside></div>
+    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Intent")}><p className="detail-copy">{initiative.intent}</p></DetailSection><DetailSection title={t("Next step")}><p className="detail-copy">{initiative.next_step ?? t("No next step recorded")}</p></DetailSection><TaskList api={api} initiativeId={id} tasks={tasks} reload={data.reload} /><DetailSection title={t("Submissions")}>{submissions.length ? <ol className="submission-timeline">{submissions.map((submission) => <SubmissionRow key={submission.id} submission={submission} />)}</ol> : <p className="text-muted">{t("No submissions are linked yet.")}</p>}</DetailSection><DetailSection title={t("Decisions")}>{decisions.length ? <div className="linked-list">{decisions.map((decision) => <a href={`#decision/${decision.id}`} className="linked-row" key={decision.id}><div><strong>{decision.question}</strong><span>{decision.resolution ?? t("Awaiting a decision")}</span></div><Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge></a>)}</div> : <p className="text-muted">{t("No decisions are linked yet.")}</p>}</DetailSection><DetailSection title={t("Activity")}><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><div className="field"><label htmlFor="initiative-status">{t("Status")}</label><select id="initiative-status" value={initiative.status} disabled={saving} onChange={(event) => void updateStatus(event.target.value as InitiativeStatus)}>{["active", "waiting_for_jim", "waiting_for_agent", "paused", "completed", "cancelled"].map((value) => <option value={value} key={value}>{displayStatus(t, value)}</option>)}</select></div><Properties rows={[[t("ID"), initiative.id], [t("Created by"), initiative.created_by], [t("Last activity"), formatDate(locale, initiative.last_activity_at)], [t("Created"), formatDate(locale, initiative.created_at)]]} /></div></aside></div>
+  </PageHeader>;
+}
+
+function TaskList({ api, initiativeId, tasks, reload }: { api: ThreadlineApi; initiativeId: string; tasks: Task[]; reload: () => void }) {
+  const { t } = useI18n();
+  const [title, setTitle] = useState("");
+  const [saving, setSaving] = useState(false);
+  const create = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim()) return;
+    setSaving(true);
+    try { await api.createTask({ initiative_id: initiativeId, title: title.trim() }); setTitle(""); reload(); } finally { setSaving(false); }
+  };
+  return <DetailSection title={t("Tasks")}>
+    <form className="resolve-form" onSubmit={create}><label htmlFor="task-title">{t("New task")}</label><div className="toolbar"><input id="task-title" value={title} onChange={(event) => setTitle(event.target.value)} required /><button className="btn btn-primary btn-sm" disabled={saving}>{t("Add")}</button></div></form>
+    {tasks.length ? <div className="linked-list">{tasks.map((task) => <div className="linked-row" key={task.id}><a href={`#task/${task.id}`}><strong>{task.title}</strong><span>{task.detail ?? t("No additional detail was provided.")}</span></a><div className="item-actions"><Badge tone={task.status}>{localizedValue(t, task.status)}</Badge><button className="btn btn-secondary btn-sm" onClick={() => void api.updateTask(task.id, { status: task.status === "completed" ? "open" : "completed" }).then(reload)}>{task.status === "completed" ? t("Reopen") : t("Complete")}</button></div></div>)}</div> : <p className="text-muted">{t("No tasks are linked yet.")}</p>}
+  </DetailSection>;
+}
+
+function TaskDetail({ api, id }: { api: ThreadlineApi; id: string }) {
+  const { t } = useI18n();
+  const data = useLoad("task", async (signal) => {
+    const task = await api.task(id, signal);
+    const [linked, submissions] = await Promise.all([api.taskSubmissions(id, signal), api.submissions(task.initiative_id, signal)]);
+    return { task, linked, submissions };
+  }, [api, id]);
+  const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { if (data.value) { setTitle(data.value.task.title); setDetail(data.value.task.detail ?? ""); } }, [data.value]);
+  if (data.loading && !data.value) return <DetailSkeleton />;
+  if (data.error && !data.value) return <StateBox title={t("Could not load task")} retry={data.reload}>{localizedError(t, data.error)}</StateBox>;
+  const value = data.value;
+  if (!value) return null;
+  const { task, linked, submissions } = value;
+  const unlinked = submissions.filter((submission) => !linked.some((item) => item.id === submission.id));
+  const save = async (event: FormEvent) => { event.preventDefault(); setSaving(true); try { await api.updateTask(id, { title: title.trim(), detail: detail.trim() || null }); data.reload(); } finally { setSaving(false); } };
+  return <PageHeader title={task.title} subtitle={`${t("Task")} · ${localizedValue(t, task.status)}`} action={<a className="btn btn-secondary btn-sm" href={`#initiative/${task.initiative_id}`}>{t("Back to initiative")}</a>}>
+    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Task")}> <form className="resolve-form" onSubmit={save}><label htmlFor="task-detail-title">{t("Title")}</label><input id="task-detail-title" value={title} onChange={(event) => setTitle(event.target.value)} required /><label htmlFor="task-detail">{t("Details")}</label><textarea id="task-detail" rows={5} value={detail} onChange={(event) => setDetail(event.target.value)} /><button className="btn btn-primary" disabled={saving}>{t("Save")}</button></form></DetailSection><DetailSection title={t("Linked submissions")}>{linked.length ? <div className="linked-list">{linked.map((submission) => <div className="linked-row" key={submission.id}><a href={`#submission/${submission.id}`}><strong>{submission.title}</strong><span>{submission.summary}</span></a><button className="btn btn-secondary btn-sm" onClick={() => void api.unlinkTaskSubmission(id, submission.id).then(data.reload)}>{t("Remove")}</button></div>)}</div> : <p className="text-muted">{t("No submissions are linked yet.")}</p>}{unlinked.length ? <div className="linked-list">{unlinked.map((submission) => <div className="linked-row" key={submission.id}><div><strong>{submission.title}</strong><span>{submission.summary}</span></div><button className="btn btn-secondary btn-sm" onClick={() => void api.linkTaskSubmission(id, submission.id).then(data.reload)}>{t("Link")}</button></div>)}</div> : null}</DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><button className="btn btn-secondary" onClick={() => void api.updateTask(id, { status: task.status === "completed" ? "open" : "completed" }).then(data.reload)}>{task.status === "completed" ? t("Reopen") : t("Complete")}</button><Properties rows={[[t("Status"), <Badge tone={task.status}>{localizedValue(t, task.status)}</Badge>], [t("Initiative"), <a href={`#initiative/${task.initiative_id}`}>{t("View")}</a>], [t("Created by"), task.created_by]]} /></div></aside></div>
   </PageHeader>;
 }
 

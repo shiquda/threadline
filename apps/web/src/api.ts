@@ -5,6 +5,7 @@ import type {
   Initiative,
   InitiativeStatus,
   Submission,
+  Task,
   Workboard,
 } from "@threadline/protocol";
 
@@ -64,6 +65,9 @@ export class ThreadlineApi {
     return this.request<Submission[]>(`/api/v1/submissions${initiativeId ? `?initiative_id=${encodeURIComponent(initiativeId)}` : ""}`, { signal: signal ?? null });
   }
   submission(id: string, signal?: AbortSignal) { return this.request<Submission>(`/api/v1/submissions/${id}`, { signal: signal ?? null }); }
+  tasks(initiativeId: string, signal?: AbortSignal) { return this.request<Task[]>(`/api/v1/tasks?initiative_id=${encodeURIComponent(initiativeId)}`, { signal: signal ?? null }); }
+  task(id: string, signal?: AbortSignal) { return this.request<Task>(`/api/v1/tasks/${id}`, { signal: signal ?? null }); }
+  taskSubmissions(id: string, signal?: AbortSignal) { return this.request<Submission[]>(`/api/v1/tasks/${id}/submissions`, { signal: signal ?? null }); }
   decisions(signal?: AbortSignal) { return this.request<Decision[]>("/api/v1/decisions", { signal: signal ?? null }); }
   decision(id: string, signal?: AbortSignal) { return this.request<Decision>(`/api/v1/decisions/${id}`, { signal: signal ?? null }); }
   events(entityType?: string, entityId?: string, signal?: AbortSignal) {
@@ -81,6 +85,18 @@ export class ThreadlineApi {
       method: "PATCH",
       body: JSON.stringify({ ...input, actor: humanActor() }),
     });
+  }
+  createTask(input: { initiative_id: string; title: string; detail?: string }) {
+    return this.request<Task>("/api/v1/tasks", { method: "POST", body: JSON.stringify({ ...input, actor: humanActor() }) });
+  }
+  updateTask(id: string, input: Partial<Pick<Task, "title" | "detail" | "status">>) {
+    return this.request<Task>(`/api/v1/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ ...input, actor: humanActor() }) });
+  }
+  linkTaskSubmission(taskId: string, submissionId: string) {
+    return this.request<void>(`/api/v1/tasks/${taskId}/submissions/${submissionId}`, { method: "POST", body: JSON.stringify({ submission_id: submissionId, actor: humanActor() }) });
+  }
+  unlinkTaskSubmission(taskId: string, submissionId: string) {
+    return this.request<void>(`/api/v1/tasks/${taskId}/submissions/${submissionId}`, { method: "PATCH", body: JSON.stringify({ submission_id: submissionId, actor: humanActor() }) });
   }
   updateNotification(id: string, action: "read" | "snooze" | "archive") {
     const snoozedUntil = action === "snooze" ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
