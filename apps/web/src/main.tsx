@@ -7,7 +7,7 @@ import {
 import type { AuditEvent, Decision, InboxItem, Initiative, InitiativeStatus, Submission, Task, Workboard } from "@threadline/protocol";
 import { ThreadlineApi, readConnection, writeConnection, type Connection } from "./api.js";
 import { formatDate, formatExactDate, humanize, I18nProvider, supportedLocales, useI18n, type Locale } from "./i18n.js";
-import { initiativeRecord, normalizeWorkboard, type InitiativeRecord } from "./workboard.js";
+import { initiativeRecord, normalizeWorkboard, uniqueInitiativeIds, type InitiativeRecord, type WorkboardLane } from "./workboard.js";
 import {
   groupSubmissionsByIdentity,
   makeAgentsSessionRoute,
@@ -26,7 +26,9 @@ type LoadResult<T> = LoadState<T> & { reload: () => void; mutate: (updater: (val
 type Translate = ReturnType<typeof useI18n>["t"];
 
 function routeFromHash(): Route {
-  const [page, ...rest] = window.location.hash.replace(/^#\/?/, "").split("/");
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const [path = ""] = raw.split("?");
+  const [page, ...rest] = path.split("/");
   if (page === "initiative" && rest[0]) return { page: "initiative", id: rest[0] };
   if (page === "decision" && rest[0]) return { page: "decision", id: rest[0] };
   if (page === "submission" && rest[0]) return { page: "submission", id: rest[0] };
@@ -39,6 +41,60 @@ function routeFromHash(): Route {
 }
 
 function navigate(route: string): void { window.location.hash = route; }
+
+function parseHash(): { path: string; params: URLSearchParams } {
+  const raw = window.location.hash.replace(/^#\/?/, "");
+  const [path = "", query = ""] = raw.split("?");
+  return { path, params: new URLSearchParams(query) };
+}
+
+function setHashParams(path: string, params: URLSearchParams, push = false): void {
+  const query = params.toString();
+  const hash = query ? `#${path}?${query}` : `#${path}`;
+  if (push) {
+    window.history.pushState(null, "", hash);
+  } else {
+    window.history.replaceState(null, "", hash);
+  }
+}
+
+function readHashParam(key: string): string | null {
+  const value = parseHash().params.get(key);
+  return value;
+}
+
+function writeHashParam(key: string, value: string | null, push = false): void {
+  const { path, params } = parseHash();
+  if (value === null || value === "" || value === "all") {
+    params.delete(key);
+  } else {
+    params.set(key, value);
+  }
+  setHashParams(path, params, push);
+}
+
+function useHashParams(): [URLSearchParams, (next: Record<string, string | null>, push?: boolean) => void] {
+  const [params, setParams] = useState(() => parseHash().params);
+  useEffect(() => {
+    const update = () => setParams(parseHash().params);
+    window.addEventListener("hashchange", update);
+    window.addEventListener("popstate", update);
+    return () => {
+      window.removeEventListener("hashchange", update);
+      window.removeEventListener("popstate", update);
+    };
+  }, []);
+  const write = useCallback((next: Record<string, string | null>, push = false) => {
+    const { path, params } = parseHash();
+    for (const [key, value] of Object.entries(next)) {
+      if (value === null || value === "" || value === "all") params.delete(key);
+      else params.set(key, value);
+    }
+    setHashParams(path, params, push);
+    setParams(new URLSearchParams(params));
+  }, []);
+  return [params, write];
+}
 
 type CacheEntry = { value: unknown; at: number };
 const loadCache = new WeakMap<ThreadlineApi, Map<string, CacheEntry>>();
@@ -166,7 +222,7 @@ function Badge({ children, tone }: { children: ReactNode; tone?: string }) {
 
 function StateBox({ title, children, retry }: { title: string; children: ReactNode; retry?: () => void }) {
   const { t } = useI18n();
-  return <div className="state-box"><Network aria-hidden="true" /><div><div className="state-title">{title}</div><p>{children}</p></div>{retry && <button className="btn btn-secondary btn-sm" onClick={retry}><RefreshCw size={15} />{t("Try again")}</button>}</div>;
+  return <div className="state-box"><Network aria-hidden="true" /><div><div className="state-title">{title}</div><p>{children}</p></div>{retry && <button className="btn btn-secondary btn-sm" onClick={retry}><RefreshCw size={15} aria-hidden="true" />{t("Try again")}</button>}</div>;
 }
 
 function SkeletonBlock({ className, width, height }: { className?: string; width?: string; height?: string }) {
@@ -208,8 +264,8 @@ function RefreshIndicator({ refreshing, error, retry }: { refreshing: boolean; e
   const { t } = useI18n();
   if (!refreshing && !error) return null;
   return <div className="refresh-indicator" role="status" aria-live="polite">
-    {refreshing && <span className="refresh-spin"><RefreshCw size={14} /></span>}
-    {refreshing && <span>{t("Refreshing")}</span>}
+    {refreshing && <span className="refresh-spin"><RefreshCw size={14} aria-hidden="true" /></span>}
+    {refreshing && <span>{t("Refreshing…")}</span>}
     {!refreshing && error && <span className="refresh-error">{localizedError(t, error)}</span>}
     {!refreshing && error && retry && <button className="btn btn-ghost btn-sm" onClick={retry}>{t("Retry")}</button>}
   </div>;
@@ -219,7 +275,7 @@ function CopyValue({ value }: { value: string | null }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   if (!value) return <span>-</span>;
-  return <button className="copy-value" title={t("Copy session ID")} onClick={() => void navigator.clipboard.writeText(value).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1400); })}>{copied ? t("Copied") : value}<Copy size={13} /></button>;
+  return <button className="copy-value" title={t("Copy session ID")} onClick={() => void navigator.clipboard.writeText(value).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1400); })}>{copied ? t("Copied") : value}<Copy size={13} aria-hidden="true" /></button>;
 }
 
 function LanguageSelector() {
@@ -245,25 +301,30 @@ function App() {
   useEffect(() => {
     const update = () => { setRoute(routeFromHash()); setMobileMenu(false); };
     window.addEventListener("hashchange", update);
-    return () => window.removeEventListener("hashchange", update);
+    window.addEventListener("popstate", update);
+    return () => {
+      window.removeEventListener("hashchange", update);
+      window.removeEventListener("popstate", update);
+    };
   }, []);
 
   const pageTitle = route.page === "overview" ? t("Overview") : route.page === "initiative" ? t("Initiative detail") : route.page === "decision" ? t("Decision detail") : route.page === "submission" ? t("Submission detail") : route.page === "task" ? t("Task") : route.page === "agents" ? t("Agents") : localizedValue(t, route.page);
   const saveConnection = (next: Connection) => { writeConnection(next); setConnection(next); setShowConnection(false); };
 
   return <div className="app-shell">
+    <a href="#main-content" className="skip-link">{t("Skip to main content")}</a>
     <Sidebar route={route} open={mobileMenu} close={() => setMobileMenu(false)} />
     <header className="topbar">
-      <button className="btn-icon mobile-menu-btn" title={t("Open menu")} aria-label={t("Open menu")} onClick={() => setMobileMenu((open) => !open)}><Menu /></button>
+      <button className="btn-icon mobile-menu-btn" type="button" title={t("Open menu")} aria-label={t("Open menu")} onClick={() => setMobileMenu((open) => !open)}><Menu aria-hidden="true" /></button>
       <div className="topbar-title">{pageTitle}</div>
       <div className="topbar-actions">
-        <button className="btn btn-secondary btn-sm desktop-only" onClick={() => setShowNewInitiative(true)}><Plus size={16} />{t("New initiative")}</button>
+        <button className="btn btn-secondary btn-sm desktop-only" type="button" onClick={() => setShowNewInitiative(true)}><Plus size={16} aria-hidden="true" />{t("New initiative")}</button>
         <LanguageSelector />
-        <button className="btn-icon" title={t("Gateway connection")} aria-label={t("Gateway connection")} onClick={() => setShowConnection(true)}><Settings2 /></button>
+        <button className="btn-icon" type="button" title={t("Gateway connection")} aria-label={t("Gateway connection")} onClick={() => setShowConnection(true)}><Settings2 aria-hidden="true" /></button>
         <div className="user-chip"><span className="avatar">Y</span>{t("You")}</div>
       </div>
     </header>
-    <main className="main">
+    <main id="main-content" className="main" tabIndex={-1}>
       {route.page === "overview" && <Overview api={api} onNew={() => setShowNewInitiative(true)} />}
       {route.page === "inbox" && <InboxPage api={api} />}
       {route.page === "workboard" && <WorkboardPage api={api} />}
@@ -286,7 +347,7 @@ function Sidebar({ route, open, close }: { route: Route; open: boolean; close: (
   ] as const;
   return <aside className={`sidebar ${open ? "open" : ""}`}>
     <div className="wordmark"><span className="wordmark-dot" />Threadline</div>
-    <nav aria-label={t("Primary navigation")}><ul className="nav-list">{links.map(([page, label, Icon]) => <li key={page}><a className={`nav-link ${route.page === page ? "active" : ""}`} href={`#${page}`} onClick={close}><Icon size={18} />{label}</a></li>)}</ul></nav>
+    <nav aria-label={t("Primary navigation")}><ul className="nav-list">{links.map(([page, label, Icon]) => <li key={page}><a className={`nav-link ${route.page === page ? "active" : ""}`} href={`#${page}`} onClick={close}><Icon size={18} aria-hidden="true" />{label}</a></li>)}</ul></nav>
     <div className="sidebar-note">{t("Shared work context for humans and agents.")}</div>
   </aside>;
 }
@@ -295,9 +356,10 @@ function Overview({ api, onNew }: { api: ThreadlineApi; onNew: () => void }) {
   const { t } = useI18n();
   const data = useLoad("overview", (signal) => Promise.all([api.inbox(signal), api.workboard(signal), api.decisions(signal)]), [api]);
   const [inbox, board, decisions] = data.value ?? [[], null, []] as [InboxItem[], Workboard | null, Decision[]];
-  const initiatives = board ? Object.values(board).flat().length : 0;
+  const normalizedBoard = board ? normalizeWorkboard(board) : null;
+  const initiatives = normalizedBoard ? uniqueInitiativeIds(normalizedBoard).size : 0;
   const open = decisions.filter((decision) => ["open", "seen"].includes(decision.status)).length;
-  return <PageHeader title="Threadline" subtitle={t("Human-Agent Gateway workbench - your shared source of attention and decisions.")} action={<button className="btn btn-primary" onClick={onNew}><Plus size={17} />{t("New initiative")}</button>}>
+  return <PageHeader title="Threadline" subtitle={t("Human-Agent Gateway workbench - your shared source of attention and decisions.")} action={<button className="btn btn-primary" onClick={onNew}><Plus size={17} aria-hidden="true" />{t("New initiative")}</button>}>
     {data.loading && !data.value ? <OverviewSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load workspace")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : <>
       <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
       <section className="overview-metrics" aria-label={t("Workspace summary")}>
@@ -305,26 +367,27 @@ function Overview({ api, onNew }: { api: ThreadlineApi; onNew: () => void }) {
         <Metric label={t("Running initiatives")} value={t("{count} on the Workboard", { count: initiatives })} href="#workboard" />
         <Metric label={t("Open decisions")} value={t("{count} waiting to close", { count: open })} href="#decisions" />
       </section>
-      <section className="overview-section"><div className="section-heading"><h2>{t("Needs attention")}</h2><a href="#inbox">{t("Open Inbox")} <ChevronRight size={16} /></a></div>{inbox.length ? <div className="mini-list">{inbox.slice(0, 3).map((item) => <MiniInboxItem item={item} key={item.notification.id} />)}</div> : <StateBox title={t("Inbox is clear")}>{t("New decisions, deliveries, and alerts will appear here.")}</StateBox>}</section>
+      <section className="overview-section"><div className="section-heading"><h2>{t("Needs attention")}</h2><a href="#inbox">{t("Open Inbox")} <ChevronRight size={16} aria-hidden="true" /></a></div>{inbox.length ? <div className="mini-list">{inbox.slice(0, 3).map((item) => <MiniInboxItem item={item} key={item.notification.id} />)}</div> : <StateBox title={t("Inbox is clear")}>{t("New decisions, deliveries, and alerts will appear here.")}</StateBox>}</section>
     </>}
   </PageHeader>;
 }
 
-function Metric({ label, value, href }: { label: string; value: string; href: string }) { return <a className="metric" href={href}><span>{label}</span><strong>{value}</strong><ChevronRight size={18} /></a>; }
+function Metric({ label, value, href }: { label: string; value: string; href: string }) { return <a className="metric" href={href}><span>{label}</span><strong>{value}</strong><ChevronRight size={18} aria-hidden="true" /></a>; }
 function inboxItemHref(item: InboxItem): string { return item.decision ? `#decision/${item.decision.id}` : `#submission/${item.submission.id}`; }
 
 function MiniInboxItem({ item }: { item: InboxItem }) {
   const { locale, t } = useI18n();
   const identity = executionIdentity(item.submission);
-  return <a className="mini-inbox" href={inboxItemHref(item)}><Badge tone={item.decision ? "decision" : item.submission.kind}>{localizedValue(t, item.decision ? "decision" : item.submission.kind)}</Badge><div><strong>{item.submission.title}</strong><span>{identity.host} · {identity.tool} · {formatDate(locale, item.submission.created_at)}</span></div><ChevronRight size={17} /></a>;
+  return <a className="mini-inbox" href={inboxItemHref(item)}><Badge tone={item.decision ? "decision" : item.submission.kind}>{localizedValue(t, item.decision ? "decision" : item.submission.kind)}</Badge><div><strong>{item.submission.title}</strong><span>{identity.host} · {identity.tool} · {formatDate(locale, item.submission.created_at)}</span></div><ChevronRight size={17} aria-hidden="true" /></a>;
 }
 
 function InboxPage({ api }: { api: ThreadlineApi }) {
   const { locale, t } = useI18n();
   const data = useLoad("inbox", (signal) => api.inbox(signal), [api]);
-  const [scope, setScope] = useState<"unread" | "all">("unread");
-  const [filter, setFilter] = useState("all");
-  const [query, setQuery] = useState("");
+  const [urlParams, setUrlParams] = useHashParams();
+  const scope = (urlParams.get("scope") === "all" ? "all" : "unread") as "unread" | "all";
+  const filter = urlParams.get("filter") ?? "all";
+  const query = urlParams.get("q") ?? "";
   const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -342,6 +405,7 @@ function InboxPage({ api }: { api: ThreadlineApi }) {
   };
 
   const handleAction = async (item: InboxItem, action: "read" | "snooze" | "archive") => {
+    if (action === "archive" && !window.confirm(t("Archive this notification? It will be moved out of the Inbox."))) return;
     const key = `${item.notification.id}:${action}`;
     setPending(key);
     setActionError(null);
@@ -371,6 +435,10 @@ function InboxPage({ api }: { api: ThreadlineApi }) {
     }
   };
 
+  const setScopeParam = (value: "unread" | "all") => setUrlParams({ scope: value === "unread" ? null : value }, true);
+  const setFilterParam = (value: string) => setUrlParams({ filter: value === "all" ? null : value }, true);
+  const setQueryParam = (value: string) => setUrlParams({ q: value || null }, false);
+
   const visible = (data.value ?? []).filter((item) => {
     const kind = item.decision ? "decision" : item.submission.kind;
     const matchesScope = scope === "all" || item.notification.status === "active";
@@ -382,10 +450,10 @@ function InboxPage({ api }: { api: ThreadlineApi }) {
   const unread = (data.value ?? []).filter((item) => item.notification.status === "active");
   const hasActiveFilter = query || filter !== "all";
   return <PageHeader title={t("Inbox")} subtitle={scope === "unread" ? t("Only things that need your attention right now.") : t("All inbox messages, including those already read.")} action={<button className="btn btn-secondary btn-sm" disabled={!unread.length} onClick={() => void markAllRead()}>{t("Mark all read")}</button>}>
-    <div className="toolbar"><input className="search-input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search host, tool, session...")} aria-label={t("Search inbox")} /><div className="filter-groups"><div className="filter-group" role="group" aria-label={t("Message scope")}>{(["unread", "all"] as const).map((value) => <button key={value} className={`btn btn-sm ${scope === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setScope(value)}>{t(value === "unread" ? "Unread" : "All messages")}</button>)}</div><div className="filter-group" role="group" aria-label={t("Message type")}>{["all", "decision", "delivery", "alert"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setFilter(value)}>{localizedValue(t, value)}</button>)}</div></div></div>
+    <div className="toolbar"><input className="search-input" type="search" name="inbox-search" value={query} onChange={(event) => setQueryParam(event.target.value)} placeholder={t("Search host, tool, session…")} aria-label={t("Search inbox")} /><div className="filter-groups"><div className="filter-group" role="group" aria-label={t("Message scope")}>{(["unread", "all"] as const).map((value) => <button key={value} className={`btn btn-sm ${scope === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setScopeParam(value)}>{t(value === "unread" ? "Unread" : "All messages")}</button>)}</div><div className="filter-group" role="group" aria-label={t("Message type")}>{["all", "decision", "delivery", "alert"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setFilterParam(value)}>{localizedValue(t, value)}</button>)}</div></div></div>
     {actionError && <div className="action-error" role="alert">{localizedError(t, actionError)}</div>}
     <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
-    {data.loading && !data.value ? <InboxSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load Inbox")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : !visible.length ? <StateBox title={hasActiveFilter ? t("No matching notifications") : scope === "all" ? t("No messages yet") : t("Inbox is clear")}>{hasActiveFilter ? t("Try a different search or filter.") : scope === "all" ? t("Messages you receive will appear here.") : t("New attention-worthy work will appear here.")}</StateBox> : <div className="inbox-list">{visible.map((item) => { const identity = executionIdentity(item.submission); return <article className={`inbox-item ${item.notification.status === "active" ? "unread" : ""}`} key={item.notification.id}><div className="item-kind"><Badge tone={item.decision ? "decision" : item.submission.kind}>{localizedValue(t, item.decision ? "decision" : item.submission.kind)}</Badge></div><div className="item-main"><div className="item-title">{item.submission.title}</div><div className="item-summary">{item.submission.summary}</div><div className="item-meta-row">{item.decision && <Badge tone={item.decision.risk_level}>{item.decision.status === "resolved" ? t("Resolved") : t("decision needed")}</Badge>}<span>{t("Host")}: <strong>{identity.host}</strong></span><span>{t("Tool")}: <strong>{identity.tool}</strong></span><CopyValue value={item.submission.session_id} />{item.initiative && <a href={`#initiative/${item.initiative.id}`}>{t("Initiative")}: <strong>{item.initiative.title}</strong></a>}<span>{formatDate(locale, item.submission.created_at)}</span></div></div><div className="item-actions">{item.notification.status === "active" && <IconAction label={t("Mark read")} disabled={pending === `${item.notification.id}:read`} onClick={() => void handleAction(item, "read")}><Check /></IconAction>}<IconAction label={t("Snooze one day")} disabled={pending === `${item.notification.id}:snooze`} onClick={() => void handleAction(item, "snooze")}><Clock3 /></IconAction><IconAction label={t("Archive")} disabled={pending === `${item.notification.id}:archive`} onClick={() => void handleAction(item, "archive")}><Archive /></IconAction><a className="btn btn-secondary btn-sm" href={inboxItemHref(item)}>{item.decision ? t("Decide") : t("View")}</a></div></article>; })}</div>}
+    {data.loading && !data.value ? <InboxSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load Inbox")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : !visible.length ? <StateBox title={hasActiveFilter ? t("No matching notifications") : scope === "all" ? t("No messages yet") : t("Inbox is clear")}>{hasActiveFilter ? t("Try a different search or filter.") : scope === "all" ? t("Messages you receive will appear here.") : t("New attention-worthy work will appear here.")}</StateBox> : <div className="inbox-list">{visible.map((item) => { const identity = executionIdentity(item.submission); return <article className={`inbox-item ${item.notification.status === "active" ? "unread" : ""}`} key={item.notification.id}><div className="item-kind"><Badge tone={item.decision ? "decision" : item.submission.kind}>{localizedValue(t, item.decision ? "decision" : item.submission.kind)}</Badge></div><div className="item-main"><div className="item-title">{item.submission.title}</div><div className="item-summary">{item.submission.summary}</div><div className="item-meta-row">{item.decision && <Badge tone={item.decision.risk_level}>{item.decision.status === "resolved" ? t("Resolved") : t("decision needed")}</Badge>}<span>{t("Host")}: <strong>{identity.host}</strong></span><span>{t("Tool")}: <strong>{identity.tool}</strong></span><CopyValue value={item.submission.session_id} />{item.initiative && <a href={`#initiative/${item.initiative.id}`}>{t("Initiative")}: <strong>{item.initiative.title}</strong></a>}<span>{formatDate(locale, item.submission.created_at)}</span></div></div><div className="item-actions">{item.notification.status === "active" && <IconAction label={t("Mark read")} disabled={pending === `${item.notification.id}:read`} onClick={() => void handleAction(item, "read")}><Check aria-hidden="true" /></IconAction>}<IconAction label={t("Snooze one day")} disabled={pending === `${item.notification.id}:snooze`} onClick={() => void handleAction(item, "snooze")}><Clock3 aria-hidden="true" /></IconAction><IconAction label={t("Archive")} disabled={pending === `${item.notification.id}:archive`} onClick={() => void handleAction(item, "archive")}><Archive aria-hidden="true" /></IconAction><a className="btn btn-secondary btn-sm" href={inboxItemHref(item)}>{item.decision ? t("Decide") : t("View")}</a></div></article>; })}</div>}
   </PageHeader>;
 }
 
@@ -395,11 +463,16 @@ function WorkboardPage({ api }: { api: ThreadlineApi }) {
   const { t } = useI18n();
   const data = useLoad("workboard", (signal) => api.workboard(signal), [api]);
   const board = normalizeWorkboard(data.value);
-  const lanes: Array<[string, InitiativeRecord[]]> = [[t("Ready"), board.ready], [t("Waiting"), board.waiting], [t("Done"), board.done]];
+  const lanes: Array<[string, WorkboardLane]> = [
+    [t("In progress"), "in_progress"],
+    [t("Waiting for you"), "waiting_for_user"],
+    [t("Waiting for Agent"), "waiting_for_agent"],
+    [t("Paused / done"), "paused_or_done"],
+  ];
   return <PageHeader title={t("Workboard")} subtitle={t("Initiatives grouped by their next state.")}>
     {data.loading && !data.value ? <WorkboardSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load Workboard")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : <>
       <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
-      <div className="board">{lanes.map(([label, initiatives]) => <section className="lane" key={label}><header className="lane-header"><h2>{label}</h2><span>{initiatives.length}</span></header><div className="lane-body">{initiatives.length ? initiatives.map((initiative, index) => <InitiativeCard initiative={initiative} key={initiative.id ?? `${label}-${index}`} />) : <div className="lane-empty">{t("No initiatives")}</div>}</div></section>)}</div>
+      <div className="board">{lanes.map(([label, key]) => <section className="lane" key={key}><header className="lane-header"><h2>{label}</h2><span>{board[key].length}</span></header><div className="lane-body">{board[key].length ? board[key].map((initiative, index) => <InitiativeCard initiative={initiative} key={initiative.id ?? `${key}-${index}`} />) : <div className="lane-empty">{t("No initiatives")}</div>}</div></section>)}</div>
     </>}
   </PageHeader>;
 }
@@ -409,21 +482,70 @@ function InitiativeCard({ initiative }: { initiative: InitiativeRecord }) {
   const record = initiativeRecord(initiative);
   const title = initiative.title || t("Untitled initiative");
   const status = initiative.status || "info";
-  return <a className="work-card" href={initiative.id ? `#initiative/${initiative.id}` : "#workboard"}><h3>{title}</h3><p><span>{t("Intent")}</span>{initiative.intent || t("Not recorded")}</p><dl className="work-card-context"><div><dt>{t("Owner")}</dt><dd>{record.owner ?? t("Not recorded")}</dd></div><div><dt>{t("Next action")}</dt><dd>{record.nextAction ?? t("Not recorded")}</dd></div><div><dt>{t("Blocker")}</dt><dd>{record.blocker ?? t("No blocker recorded")}</dd></div><div><dt>{t("Recent fact")}</dt><dd>{record.recentFact ?? t("No recent fact recorded")}</dd></div><div><dt>{t("Record language")}</dt><dd>{record.recordLanguage ?? t("Not recorded")}</dd></div></dl><footer><Badge tone={status}>{displayStatus(t, status)}</Badge><span>{formatDate(locale, initiative.last_activity_at ?? null)}</span></footer></a>;
+  const isWaiting = status === "waiting_for_jim" || status === "waiting_for_agent";
+  const contextRows: Array<[label: string, value: string | null]> = [
+    [t("Intent"), initiative.intent || null],
+    [t("Next action"), record.nextAction],
+    [t("Blocker"), record.blocker],
+    [t("Recent fact"), record.recentFact],
+    [t("Owner"), record.owner],
+    [t("Record language"), record.recordLanguage],
+  ];
+  const visibleRows = contextRows.filter(([, value]) => value);
+  return <a className="work-card" href={initiative.id ? `#initiative/${initiative.id}` : "#workboard"}>
+    <h3>{title}</h3>
+    {visibleRows.length > 0 && <dl className="work-card-context">{visibleRows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+    <footer>
+      <Badge tone={status}>{displayStatus(t, status)}</Badge>
+      {isWaiting && record.owner && <span title={t("Waiting owner")}>{record.owner}</span>}
+      <span>{formatDate(locale, initiative.last_activity_at ?? null)}</span>
+    </footer>
+  </a>;
+}
+
+function DecisionCard({ decision, initiativeName, t }: { decision: Decision; initiativeName: string; t: Translate }) {
+  return <article className="decision-card" key={decision.id}>
+    <div className="decision-card-main">
+      <div className="decision-card-row">
+        <span className="decision-card-label">{t("Question")}</span>
+        <span className="decision-card-value decision-card-question">{decision.question}</span>
+      </div>
+      {decision.options && decision.options.length > 0 && <div className="decision-card-row">
+        <span className="decision-card-label">{t("Options")}</span>
+        <span className="decision-card-value">{decision.options.join(" / ")}</span>
+      </div>}
+      <div className="decision-card-row">
+        <span className="decision-card-label">{t("Initiative")}</span>
+        <span className="decision-card-value">{decision.initiative_id ? initiativeName || decision.initiative_id : "-"}</span>
+      </div>
+    </div>
+    <div className="decision-card-footer">
+      <div className="decision-card-badges">
+        <Badge tone={decision.risk_level}>{localizedValue(t, decision.risk_level)}</Badge>
+        <Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge>
+      </div>
+      <a className="btn btn-secondary btn-sm" href={`#decision/${decision.id}`}>{decision.status === "resolved" ? t("View") : t("Decide")}</a>
+    </div>
+  </article>;
 }
 
 function DecisionsPage({ api }: { api: ThreadlineApi }) {
   const { t } = useI18n();
   const data = useLoad("decisions", (signal) => Promise.all([api.decisions(signal), api.initiatives(signal)]), [api]);
-  const [filter, setFilter] = useState("open");
+  const [urlParams, setUrlParams] = useHashParams();
+  const filter = urlParams.get("filter") ?? "open";
   const [decisions, initiatives] = data.value ?? [[], []] as [Decision[], Initiative[]];
   const initiativeNames = new Map(initiatives.map((item) => [item.id, item.title]));
   const visible = decisions.filter((decision) => filter === "all" || (filter === "open" ? ["open", "seen"].includes(decision.status) : decision.status === "resolved"));
+  const setFilterParam = (value: string) => setUrlParams({ filter: value === "open" ? null : value }, true);
   return <PageHeader title={t("Decision Registry")} subtitle={t("Open and closed decisions with risk, source session, and resolution.")}>
-    <div className="toolbar"><div className="filter-group">{["all", "open", "resolved"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilter(value)}>{localizedValue(t, value)}</button>)}</div></div>
+    <div className="toolbar"><div className="filter-group">{["all", "open", "resolved"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilterParam(value)}>{localizedValue(t, value)}</button>)}</div></div>
     {data.loading && !data.value ? <DecisionsSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load decisions")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : <>
       <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
-      {!visible.length ? <StateBox title={t("No decisions here")}>{filter === "open" ? t("There are no decisions waiting to close.") : t("Decisions created by Agents will appear here.")}</StateBox> : <div className="table-wrap"><table className="data-table"><caption className="sr-only">{t("Decision Registry")}</caption><thead><tr><th>{t("Question")}</th><th>{t("Options")}</th><th>{t("Risk")}</th><th>{t("Initiative")}</th><th>{t("Status")}</th><th /></tr></thead><tbody>{visible.map((decision) => <tr key={decision.id}><td className="cell-primary">{decision.question}</td><td className="cell-secondary">{decision.options?.join(" / ") ?? "-"}</td><td><Badge tone={decision.risk_level}>{localizedValue(t, decision.risk_level)}</Badge></td><td className="cell-secondary">{decision.initiative_id ? initiativeNames.get(decision.initiative_id) ?? decision.initiative_id : "-"}</td><td><Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge></td><td><a className="btn btn-secondary btn-sm" href={`#decision/${decision.id}`}>{decision.status === "resolved" ? t("View") : t("Decide")}</a></td></tr>)}</tbody></table></div>}
+      {!visible.length ? <StateBox title={t("No decisions here")}>{filter === "open" ? t("There are no decisions waiting to close.") : t("Decisions created by Agents will appear here.")}</StateBox> : <>
+        <div className="table-wrap desktop-only-table"><table className="data-table"><caption className="sr-only">{t("Decision Registry")}</caption><thead><tr><th>{t("Question")}</th><th>{t("Options")}</th><th>{t("Risk")}</th><th>{t("Initiative")}</th><th>{t("Status")}</th><th /></tr></thead><tbody>{visible.map((decision) => <tr key={decision.id}><td className="cell-primary">{decision.question}</td><td className="cell-secondary">{decision.options?.join(" / ") ?? "-"}</td><td><Badge tone={decision.risk_level}>{localizedValue(t, decision.risk_level)}</Badge></td><td className="cell-secondary">{decision.initiative_id ? initiativeNames.get(decision.initiative_id) ?? decision.initiative_id : "-"}</td><td><Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge></td><td><a className="btn btn-secondary btn-sm" href={`#decision/${decision.id}`}>{decision.status === "resolved" ? t("View") : t("Decide")}</a></td></tr>)}</tbody></table></div>
+        <div className="decision-list" role="list">{visible.map((decision) => <DecisionCard key={decision.id} decision={decision} initiativeName={decision.initiative_id ? initiativeNames.get(decision.initiative_id) ?? "" : ""} t={t} />)}</div>
+      </>}
     </>}
   </PageHeader>;
 }
@@ -439,8 +561,9 @@ function executionIdentity(submission: Submission): { host: string; tool: string
 function AgentsPage({ api }: { api: ThreadlineApi }) {
   const { t } = useI18n();
   const route = routeFromHash();
+  const [urlParams, setUrlParams] = useHashParams();
+  const query = urlParams.get("q") ?? "";
   const data = useLoad("agents", (signal) => api.submissions(undefined, signal), [api]);
-  const [query, setQuery] = useState("");
   const [expandedHosts, setExpandedHosts] = useState<Set<string>>(new Set());
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
 
@@ -487,15 +610,20 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
   };
 
   const selectSession = (host: string, tool: string, session: string) => {
-    navigate(`#${makeAgentsSessionRoute(host, tool, session)}`);
+    const { params } = parseHash();
+    const query = params.toString();
+    const path = `agents/${makeAgentsSessionRoute(host, tool, session)}`;
+    navigate(query ? `#${path}?${query}` : `#${path}`);
   };
+
+  const setQueryParam = (value: string) => setUrlParams({ q: value || null }, false);
 
   const totalHosts = groups.length;
   const isHostExpanded = (host: string) => expandedHosts.has(host);
   const isToolExpanded = (host: string, tool: string) => expandedTools.has(toolKey(host, tool));
 
   return <PageHeader title={t("Agents")} subtitle={t("Browse work by execution host, tool, and session.")}>
-    <div className="toolbar"><input className="search-input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search host, tool, session...")} aria-label={t("Search agents")} /></div>
+    <div className="toolbar"><input className="search-input" type="search" name="agents-search" value={query} onChange={(event) => setQueryParam(event.target.value)} placeholder={t("Search host, tool, session…")} aria-label={t("Search agents")} /></div>
     {data.loading && !data.value ? <SkeletonMiniList /> : data.error && !data.value ? <StateBox title={t("Could not load agents")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : !totalHosts ? <StateBox title={t("No matching agents")}>{t("Agent work will appear here.")}</StateBox> : <>
       <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
       <div className="agents-layout">
@@ -505,7 +633,7 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
             {groups.map((hostNode) => (
               <div className="agents-host" key={hostNode.host}>
                 <button className={`agents-host-row ${hostNode.host === UNKNOWN_HOST ? "unknown" : ""}`} aria-expanded={isHostExpanded(hostNode.host)} onClick={() => toggleHost(hostNode.host)}>
-                  <ChevronRight size={16} className="chevron" />
+                  <ChevronRight size={16} className="chevron" aria-hidden="true" />
                   <span>{hostNode.host}</span>
                   <span className="count"><Badge tone="info">{hostNode.tools.reduce((sum, tool) => sum + tool.sessions.reduce((s, session) => s + session.submissions.length, 0), 0)}</Badge></span>
                 </button>
@@ -514,7 +642,7 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
                     {hostNode.tools.map((toolNode) => (
                       <div className="agents-tool" key={toolNode.tool}>
                         <button className={`agents-tool-row ${toolNode.tool === UNKNOWN_TOOL ? "unknown" : ""}`} aria-expanded={isToolExpanded(hostNode.host, toolNode.tool)} onClick={() => toggleTool(hostNode.host, toolNode.tool)}>
-                          <ChevronRight size={16} className="chevron" />
+                          <ChevronRight size={16} className="chevron" aria-hidden="true" />
                           <span>{toolNode.tool}</span>
                           <span className="count"><Badge tone="info">{toolNode.sessions.reduce((sum, session) => sum + session.submissions.length, 0)}</Badge></span>
                         </button>
@@ -576,14 +704,28 @@ function TaskList({ api, initiativeId, tasks, reload }: { api: ThreadlineApi; in
   const { t } = useI18n();
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const create = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
     setSaving(true);
-    try { await api.createTask({ initiative_id: initiativeId, title: title.trim() }); setTitle(""); reload(); } finally { setSaving(false); }
+    setSaveError(null);
+    try {
+      await api.createTask({ initiative_id: initiativeId, title: title.trim() });
+      setTitle("");
+      reload();
+    } catch (error: unknown) {
+      setSaveError(error instanceof Error ? error.message : t("Something went wrong."));
+    } finally {
+      setSaving(false);
+    }
   };
   return <DetailSection title={t("Tasks")}>
-    <form className="resolve-form" onSubmit={create}><label htmlFor="task-title">{t("New task")}</label><div className="toolbar"><input id="task-title" value={title} onChange={(event) => setTitle(event.target.value)} required /><button className="btn btn-primary btn-sm" disabled={saving}>{t("Add")}</button></div></form>
+    <form className="resolve-form" onSubmit={create}>
+      {saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}
+      <label htmlFor="task-title">{t("New task")}</label>
+      <div className="toolbar"><input id="task-title" name="task-title" autoComplete="off" spellCheck="true" value={title} onChange={(event) => setTitle(event.target.value)} required /><button className="btn btn-primary btn-sm" disabled={saving}>{saving ? t("Adding…") : t("Add")}</button></div>
+    </form>
     {tasks.length ? <div className="linked-list">{tasks.map((task) => <div className="linked-row" key={task.id}><a href={`#task/${task.id}`}><strong>{task.title}</strong><span>{task.detail ?? t("No additional detail was provided.")}</span></a><div className="item-actions"><Badge tone={task.status}>{localizedValue(t, task.status)}</Badge><button className="btn btn-secondary btn-sm" onClick={() => void api.updateTask(task.id, { status: task.status === "completed" ? "open" : "completed" }).then(reload)}>{task.status === "completed" ? t("Reopen") : t("Complete")}</button></div></div>)}</div> : <p className="text-muted">{t("No tasks are linked yet.")}</p>}
   </DetailSection>;
 }
@@ -598,16 +740,38 @@ function TaskDetail({ api, id }: { api: ThreadlineApi; id: string }) {
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
   const [saving, setSaving] = useState(false);
-  useEffect(() => { if (data.value) { setTitle(data.value.task.title); setDetail(data.value.task.detail ?? ""); } }, [data.value]);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  useEffect(() => { if (data.value) { setTitle(data.value.task.title); setDetail(data.value.task.detail ?? ""); setSaveError(null); } }, [data.value]);
   if (data.loading && !data.value) return <DetailSkeleton />;
   if (data.error && !data.value) return <StateBox title={t("Could not load task")} retry={data.reload}>{localizedError(t, data.error)}</StateBox>;
   const value = data.value;
   if (!value) return null;
   const { task, linked, submissions } = value;
   const unlinked = submissions.filter((submission) => !linked.some((item) => item.id === submission.id));
-  const save = async (event: FormEvent) => { event.preventDefault(); setSaving(true); try { await api.updateTask(id, { title: title.trim(), detail: detail.trim() || null }); data.reload(); } finally { setSaving(false); } };
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api.updateTask(id, { title: title.trim(), detail: detail.trim() || null });
+      data.reload();
+    } catch (error: unknown) {
+      setSaveError(error instanceof Error ? error.message : t("Something went wrong."));
+    } finally {
+      setSaving(false);
+    }
+  };
   return <PageHeader title={task.title} subtitle={`${t("Task")} · ${localizedValue(t, task.status)}`} action={<a className="btn btn-secondary btn-sm" href={`#initiative/${task.initiative_id}`}>{t("Back to initiative")}</a>}>
-    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Task")}> <form className="resolve-form" onSubmit={save}><label htmlFor="task-detail-title">{t("Title")}</label><input id="task-detail-title" value={title} onChange={(event) => setTitle(event.target.value)} required /><label htmlFor="task-detail">{t("Details")}</label><textarea id="task-detail" rows={5} value={detail} onChange={(event) => setDetail(event.target.value)} /><button className="btn btn-primary" disabled={saving}>{t("Save")}</button></form></DetailSection><DetailSection title={t("Linked submissions")}>{linked.length ? <div className="linked-list">{linked.map((submission) => <div className="linked-row" key={submission.id}><a href={`#submission/${submission.id}`}><strong>{submission.title}</strong><span>{submission.summary}</span></a><button className="btn btn-secondary btn-sm" onClick={() => void api.unlinkTaskSubmission(id, submission.id).then(data.reload)}>{t("Remove")}</button></div>)}</div> : <p className="text-muted">{t("No submissions are linked yet.")}</p>}{unlinked.length ? <div className="linked-list">{unlinked.map((submission) => <div className="linked-row" key={submission.id}><div><strong>{submission.title}</strong><span>{submission.summary}</span></div><button className="btn btn-secondary btn-sm" onClick={() => void api.linkTaskSubmission(id, submission.id).then(data.reload)}>{t("Link")}</button></div>)}</div> : null}</DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><button className="btn btn-secondary" onClick={() => void api.updateTask(id, { status: task.status === "completed" ? "open" : "completed" }).then(data.reload)}>{task.status === "completed" ? t("Reopen") : t("Complete")}</button><Properties rows={[[t("Status"), <Badge tone={task.status}>{localizedValue(t, task.status)}</Badge>], [t("Initiative"), <a href={`#initiative/${task.initiative_id}`}>{t("View")}</a>], [t("Created by"), task.created_by]]} /></div></aside></div>
+    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Task")}>
+      <form className="resolve-form" onSubmit={save}>
+        {saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}
+        <label htmlFor="task-detail-title">{t("Title")}</label>
+        <input id="task-detail-title" name="task-title" autoComplete="off" spellCheck="true" value={title} onChange={(event) => setTitle(event.target.value)} required />
+        <label htmlFor="task-detail">{t("Details")}</label>
+        <textarea id="task-detail" name="task-detail" spellCheck="true" rows={5} value={detail} onChange={(event) => setDetail(event.target.value)} />
+        <button className="btn btn-primary" disabled={saving}>{saving ? t("Saving…") : t("Save")}</button>
+      </form>
+    </DetailSection><DetailSection title={t("Linked submissions")}>{linked.length ? <div className="linked-list">{linked.map((submission) => <div className="linked-row" key={submission.id}><a href={`#submission/${submission.id}`}><strong>{submission.title}</strong><span>{submission.summary}</span></a><button className="btn btn-secondary btn-sm" onClick={() => void api.unlinkTaskSubmission(id, submission.id).then(data.reload)}>{t("Remove")}</button></div>)}</div> : <p className="text-muted">{t("No submissions are linked yet.")}</p>}{unlinked.length ? <div className="linked-list">{unlinked.map((submission) => <div className="linked-row" key={submission.id}><div><strong>{submission.title}</strong><span>{submission.summary}</span></div><button className="btn btn-secondary btn-sm" onClick={() => void api.linkTaskSubmission(id, submission.id).then(data.reload)}>{t("Link")}</button></div>)}</div> : null}</DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><button className="btn btn-secondary" onClick={() => void api.updateTask(id, { status: task.status === "completed" ? "open" : "completed" }).then(data.reload)}>{task.status === "completed" ? t("Reopen") : t("Complete")}</button><Properties rows={[[t("Status"), <Badge tone={task.status}>{localizedValue(t, task.status)}</Badge>], [t("Initiative"), <a href={`#initiative/${task.initiative_id}`}>{t("View")}</a>], [t("Created by"), task.created_by]]} /></div></aside></div>
   </PageHeader>;
 }
 
@@ -616,17 +780,31 @@ function DecisionDetail({ api, id }: { api: ThreadlineApi; id: string }) {
   const data = useLoad("decision", (signal) => Promise.all([api.decision(id, signal), api.submissions(undefined, signal), api.initiatives(signal), api.events("decision", id, signal)]), [api, id]);
   const [outcome, setOutcome] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   if (data.loading && !data.value) return <DetailSkeleton />;
   if (data.error && !data.value) return <StateBox title={t("Could not load decision")} retry={data.reload}>{localizedError(t, data.error)}</StateBox>;
   if (!data.value) return null;
   const [decision, submissions, initiatives, events] = data.value;
   const submission = submissions.find((item) => item.id === decision.submission_id);
   const initiative = initiatives.find((item) => item.id === decision.initiative_id);
-  const resolve = async (event: FormEvent) => { event.preventDefault(); if (!outcome.trim()) return; setSaving(true); try { await api.resolveDecision(id, outcome.trim()); data.reload(); } finally { setSaving(false); } };
+  const resolve = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!outcome.trim()) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api.resolveDecision(id, outcome.trim());
+      data.reload();
+    } catch (error: unknown) {
+      setSaveError(error instanceof Error ? error.message : t("Something went wrong."));
+    } finally {
+      setSaving(false);
+    }
+  };
   const identity = submission ? executionIdentity(submission) : null;
   return <PageHeader title={decision.question} subtitle={`${t("Decision")} · ${localizedValue(t, decision.status)} · ${t("{status} risk", { status: localizedValue(t, decision.risk_level) })}`} action={<a className="btn btn-secondary btn-sm" href="#decisions">{t("Back to registry")}</a>}>
     <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
-    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Question")}><p className="detail-copy">{decision.question}</p></DetailSection><DetailSection title={t("Options")}>{decision.options?.length ? <ul className="option-list">{decision.options.map((option) => <li key={option}>{option}</li>)}</ul> : <p className="text-muted">{t("No preset options were provided.")}</p>}</DetailSection>{decision.status !== "resolved" ? <DetailSection title={t("Close decision")}><form onSubmit={resolve} className="resolve-form"><label htmlFor="outcome">{t("Outcome")}</label><textarea id="outcome" value={outcome} onChange={(event) => setOutcome(event.target.value)} rows={4} placeholder={t("Record the decision and the reason for it.")} required /><p>{t("Closing this writes the same semantic event an Agent would produce via the CLI. The linked Inbox item will disappear.")}</p><button className="btn btn-primary" disabled={saving}>{saving ? t("Resolving...") : t("Close decision")}</button></form></DetailSection> : <DetailSection title={t("Resolution")}><p className="resolution">{decision.resolution}</p><p className="text-muted">{t("Resolved by {name} via {via} · {date}", { name: decision.resolved_by ?? "-", via: decision.resolved_via ?? "-", date: formatDate(locale, decision.resolved_at) })}</p></DetailSection>}<DetailSection title={t("Audit trail")}><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><Properties rows={[[t("ID"), decision.id], [t("Status"), <Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge>], [t("Risk"), <Badge tone={decision.risk_level}>{localizedValue(t, decision.risk_level)}</Badge>], [t("Host"), identity?.host ?? "-"], [t("Tool"), identity?.tool ?? "-"], [t("Session"), <CopyValue value={submission?.session_id ?? null} />], [t("Initiative"), initiative ? <a href={`#initiative/${initiative.id}`}>{initiative.title}</a> : "-"], [t("Created"), formatDate(locale, decision.created_at)]]} /></div></aside></div>
+    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Question")}><p className="detail-copy">{decision.question}</p></DetailSection><DetailSection title={t("Options")}>{decision.options?.length ? <ul className="option-list">{decision.options.map((option) => <li key={option}>{option}</li>)}</ul> : <p className="text-muted">{t("No preset options were provided.")}</p>}</DetailSection>{decision.status !== "resolved" ? <DetailSection title={t("Close decision")}><form onSubmit={resolve} className="resolve-form">{saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}<label htmlFor="outcome">{t("Outcome")}</label><textarea id="outcome" name="outcome" spellCheck="true" value={outcome} onChange={(event) => setOutcome(event.target.value)} rows={4} placeholder={t("Record the decision and the reason for it.")} required /><p>{t("Closing this writes the same semantic event an Agent would produce via the CLI. The linked Inbox item will disappear.")}</p><button className="btn btn-primary" disabled={saving}>{saving ? t("Resolving…") : t("Close decision")}</button></form></DetailSection> : <DetailSection title={t("Resolution")}><p className="resolution">{decision.resolution}</p><p className="text-muted">{t("Resolved by {name} via {via} · {date}", { name: decision.resolved_by ?? "-", via: decision.resolved_via ?? "-", date: formatDate(locale, decision.resolved_at) })}</p></DetailSection>}<DetailSection title={t("Audit trail")}><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><Properties rows={[[t("ID"), decision.id], [t("Status"), <Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge>], [t("Risk"), <Badge tone={decision.risk_level}>{localizedValue(t, decision.risk_level)}</Badge>], [t("Host"), identity?.host ?? "-"], [t("Tool"), identity?.tool ?? "-"], [t("Session"), <CopyValue value={submission?.session_id ?? null} />], [t("Initiative"), initiative ? <a href={`#initiative/${initiative.id}`}>{initiative.title}</a> : "-"], [t("Created"), formatDate(locale, decision.created_at)]]} /></div></aside></div>
   </PageHeader>;
 }
 
@@ -646,7 +824,7 @@ function SubmissionDetail({ api, id }: { api: ThreadlineApi; id: string }) {
 
 function SubmissionRow({ submission }: { submission: Submission }) {
   const { locale, t } = useI18n();
-  const timestamp = formatExactDate(submission.created_at);
+  const timestamp = formatExactDate(submission.created_at, locale);
   return <li><a className="submission-timeline-item" href={`#submission/${submission.id}`}><time dateTime={submission.created_at} title={timestamp}><span>{formatDate(locale, submission.created_at)}</span><span>{timestamp}</span></time><div className="submission-timeline-content"><div><strong>{submission.title}</strong><span>{submission.summary}</span></div><Badge tone={submission.kind}>{localizedValue(t, submission.kind)}</Badge></div></a></li>;
 }
 
@@ -663,7 +841,8 @@ function ConnectionDialog({ current, onClose, onSave }: { current: Connection; o
   const { t } = useI18n();
   const [url, setUrl] = useState(current.url);
   const [token, setToken] = useState(current.token);
-  return <Dialog title={t("Gateway connection")} onClose={onClose}><form onSubmit={(event) => { event.preventDefault(); onSave({ url: url.trim(), token: token.trim() }); }}><div className="modal-body"><div className="field"><label htmlFor="gateway-url">{t("Gateway URL")}</label><input id="gateway-url" type="url" required value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://gateway.example.com" /></div><div className="field"><label htmlFor="gateway-token">{t("Instance token")}</label><input id="gateway-token" type="password" required value={token} onChange={(event) => setToken(event.target.value)} placeholder={t("Bearer token")} /><p className="field-help">{t("Stored only in this browser on this device.")}</p></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>{t("Cancel")}</button><button className="btn btn-primary">{t("Save connection")}</button></div></form></Dialog>;
+  const dirty = url.trim() !== current.url.trim() || token.trim() !== current.token.trim();
+  return <Dialog title={t("Gateway connection")} onClose={onClose} dirty={dirty}><form onSubmit={(event) => { event.preventDefault(); onSave({ url: url.trim(), token: token.trim() }); }}><div className="modal-body"><div className="field"><label htmlFor="gateway-url">{t("Gateway URL")}</label><input id="gateway-url" name="gateway-url" type="url" autoComplete="url" required value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://gateway.example.com" /></div><div className="field"><label htmlFor="gateway-token">{t("Instance token")}</label><input id="gateway-token" name="gateway-token" type="password" autoComplete="current-password" required value={token} onChange={(event) => setToken(event.target.value)} placeholder={t("Bearer token")} /><p className="field-help">{t("Stored only in this browser on this device.")}</p></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>{t("Cancel")}</button><button className="btn btn-primary">{t("Save connection")}</button></div></form></Dialog>;
 }
 
 function NewInitiativeDialog({ api, onClose }: { api: ThreadlineApi; onClose: () => void }) {
@@ -672,13 +851,85 @@ function NewInitiativeDialog({ api, onClose }: { api: ThreadlineApi; onClose: ()
   const [intent, setIntent] = useState("");
   const [nextStep, setNextStep] = useState("");
   const [saving, setSaving] = useState(false);
-  const submit = async (event: FormEvent) => { event.preventDefault(); setSaving(true); try { const initiative = await api.createInitiative({ title, intent, status: "active", next_step: nextStep || null }); onClose(); navigate(`initiative/${initiative.id}`); } finally { setSaving(false); } };
-  return <Dialog title={t("New initiative")} onClose={onClose}><form onSubmit={submit}><div className="modal-body"><div className="field"><label htmlFor="initiative-title">{t("Title")}</label><input id="initiative-title" required value={title} onChange={(event) => setTitle(event.target.value)} /></div><div className="field"><label htmlFor="initiative-intent">{t("Intent")}</label><textarea id="initiative-intent" rows={4} required value={intent} onChange={(event) => setIntent(event.target.value)} /></div><div className="field"><label htmlFor="initiative-next">{t("Next step")}</label><input id="initiative-next" value={nextStep} onChange={(event) => setNextStep(event.target.value)} /></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>{t("Cancel")}</button><button className="btn btn-primary" disabled={saving}>{saving ? t("Creating...") : t("Create initiative")}</button></div></form></Dialog>;
+  const dirty = title.trim().length > 0 || intent.trim().length > 0 || nextStep.trim().length > 0;
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim() || !intent.trim()) return;
+    setSaving(true);
+    try { const initiative = await api.createInitiative({ title: title.trim(), intent: intent.trim(), status: "active", next_step: nextStep.trim() || null }); onClose(); navigate(`initiative/${initiative.id}`); } finally { setSaving(false); }
+  };
+  return <Dialog title={t("New initiative")} onClose={onClose} dirty={dirty}><form onSubmit={submit}><div className="modal-body"><div className="field"><label htmlFor="initiative-title">{t("Title")}</label><input id="initiative-title" name="initiative-title" autoComplete="off" spellCheck="true" required value={title} onChange={(event) => setTitle(event.target.value)} /></div><div className="field"><label htmlFor="initiative-intent">{t("Intent")}</label><textarea id="initiative-intent" name="initiative-intent" spellCheck="true" rows={4} required value={intent} onChange={(event) => setIntent(event.target.value)} /></div><div className="field"><label htmlFor="initiative-next">{t("Next step")}</label><input id="initiative-next" name="initiative-next" autoComplete="off" value={nextStep} onChange={(event) => setNextStep(event.target.value)} /></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>{t("Cancel")}</button><button className="btn btn-primary" disabled={saving}>{saving ? t("Creating…") : t("Create initiative")}</button></div></form></Dialog>;
 }
 
-function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+let dialogIdCounter = 0;
+
+function Dialog({ title, children, onClose, dirty = false }: { title: string; children: ReactNode; onClose: () => void; dirty?: boolean }) {
   const { t } = useI18n();
-  return <div className="modal-backdrop open" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}><section className="modal" role="dialog" aria-modal="true" aria-label={title}><header className="modal-header"><h2>{title}</h2><button className="btn-icon" title={t("Close")} aria-label={t("Close")} onClick={onClose}><X /></button></header>{children}</section></div>;
+  const titleId = useMemo(() => `dialog-title-${++dialogIdCounter}`, []);
+  const modalRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<Element | null>(null);
+
+  const requestClose = useCallback(() => {
+    if (dirty && !window.confirm(t("You have unsaved changes. Discard them?"))) return;
+    onClose();
+  }, [dirty, onClose, t]);
+
+  useEffect(() => {
+    triggerRef.current = document.activeElement;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const modal = modalRef.current;
+    const focusable = modal?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    const first = focusable?.[0];
+    first?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        requestClose();
+        return;
+      }
+      if (event.key !== "Tab" || !modal) return;
+      const elements = Array.from(modal.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((el) => el.offsetParent !== null);
+      if (elements.length === 0) return;
+      const firstEl = elements[0];
+      const lastEl = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === firstEl && lastEl) {
+        event.preventDefault();
+        lastEl.focus();
+      } else if (!event.shiftKey && document.activeElement === lastEl && firstEl) {
+        event.preventDefault();
+        firstEl.focus();
+      }
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      const target = event.target as Node;
+      if (!modal || modal.contains(target)) return;
+      event.preventDefault();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("wheel", handleWheel);
+      document.body.style.overflow = originalOverflow;
+      const trigger = triggerRef.current;
+      if (trigger instanceof HTMLElement && document.contains(trigger)) trigger.focus();
+    };
+  }, [requestClose]);
+
+  return <div className="modal-backdrop open" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) requestClose(); }}>
+    <section ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === "Escape") event.stopPropagation(); }}>
+      <header className="modal-header"><h2 id={titleId}>{title}</h2><button className="btn-icon" type="button" title={t("Close")} aria-label={t("Close")} onClick={() => requestClose()}><X aria-hidden="true" /></button></header>
+      {children}
+    </section>
+  </div>;
 }
 
 createRoot(document.getElementById("root")!).render(<I18nProvider><App /></I18nProvider>);

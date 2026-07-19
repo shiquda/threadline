@@ -16,7 +16,7 @@ describe("Web I18N", () => {
   it("translates Chinese interface text with English fallback", () => {
     expect(translate("zh-CN", "New initiative")).toBe("新建项目");
     expect(translate("zh-CN", "{count} need attention", { count: 3 })).toBe("3 项需要关注");
-    expect(translate("zh-CN", "Refreshing")).toBe("正在刷新");
+    expect(translate("zh-CN", "Refreshing…")).toBe("正在刷新…");
     expect(translate("zh-CN", "Retry")).toBe("重试");
     expect(translate("zh-CN", "Untranslated label")).toBe("Untranslated label");
     expect(translate("en", "New initiative")).toBe("New initiative");
@@ -29,8 +29,9 @@ describe("Web I18N", () => {
     expect(formatDate("en", thirtyMinutesAgo, now)).toBe("30 min ago");
   });
 
-  it("formats timestamps with date and minute precision", () => {
-    expect(formatExactDate("2026-07-19T02:05:42.000Z")).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
-    expect(formatExactDate(null)).toBe("-");
+  it("formats timestamps with locale-aware date and minute precision", () => {
+    expect(formatExactDate("2026-07-19T02:05:42.000Z", "en")).toMatch(/^\d{2}\/\d{2}\/\d{4},?\s+\d{2}:\d{2}$/);
+    expect(formatExactDate("2026-07-19T02:05:42.000Z", "zh-CN")).toMatch(/^\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}$/);
+    expect(formatExactDate(null, "en")).toBe("-");
   });
 });

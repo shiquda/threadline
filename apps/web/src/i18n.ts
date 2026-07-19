@@ -18,6 +18,7 @@ const zhCN: Record<string, string> = {
   "Decision detail": "决策详情",
   "Submission detail": "提交详情",
   "Open menu": "打开菜单",
+  "Skip to main content": "跳转到主要内容",
   "Primary navigation": "主导航",
   "New initiative": "新建项目",
   "Gateway connection": "网关连接",
@@ -48,7 +49,7 @@ const zhCN: Record<string, string> = {
   "All inbox messages, including those already read.": "查看所有收件箱消息，包括已读消息。",
   "Mark all read": "全部标为已读",
   "Search runtime, agent, session...": "搜索运行时、智能体、会话...",
-  "Search host, tool, session...": "搜索主机、工具、会话...",
+  "Search host, tool, session…": "搜索主机、工具、会话…",
   "Search agents": "搜索智能体",
   "Browse work by execution host, tool, and session.": "按执行主机、工具和会话浏览工作记录。",
   "Host / Tool / Session": "主机 / 工具 / 会话",
@@ -86,6 +87,7 @@ const zhCN: Record<string, string> = {
   "Initiative": "项目",
   "Mark read": "标为已读",
   "Snooze one day": "稍后一天",
+  "Archive this notification? It will be moved out of the Inbox.": "确定归档此通知吗？归档后将移出收件箱。",
   "Archive": "归档",
   "Decide": "决策",
   "View": "查看",
@@ -97,6 +99,7 @@ const zhCN: Record<string, string> = {
   "Waiting for you": "等待你处理",
   "Waiting for Agent": "等待智能体",
   "Paused / done": "已暂停 / 已完成",
+  "Waiting owner": "等待负责人",
   "Loading Workboard": "正在加载工作看板",
   "Fetching current initiative states.": "正在获取当前项目状态。",
   "Could not load Workboard": "无法加载工作看板",
@@ -135,6 +138,7 @@ const zhCN: Record<string, string> = {
   "Tasks": "任务",
   "New task": "新建任务",
   "Add": "添加",
+  "Adding…": "正在添加…",
   "Complete": "完成",
   "Reopen": "重新打开",
   "Back to initiative": "返回项目",
@@ -162,7 +166,7 @@ const zhCN: Record<string, string> = {
   "Outcome": "结果",
   "Record the decision and the reason for it.": "记录决策及其原因。",
   "Closing this writes the same semantic event an Agent would produce via the CLI. The linked Inbox item will disappear.": "关闭后会写入与智能体 CLI 相同的语义事件，关联的收件箱项目将消失。",
-  "Resolving...": "正在处理...",
+  "Resolving…": "正在处理…",
   "Resolution": "处理结果",
   "Resolved by {name} via {via} · {date}": "由 {name} 通过 {via} 处理 · {date}",
   "Audit trail": "审计记录",
@@ -186,15 +190,18 @@ const zhCN: Record<string, string> = {
   "Bearer token": "Bearer 令牌",
   "Stored only in this browser on this device.": "仅存储在此设备的浏览器中。",
   "Cancel": "取消",
+  "Save": "保存",
+  "Saving…": "正在保存…",
   "Save connection": "保存连接",
   "Title": "标题",
-  "Creating...": "正在创建...",
+  "Creating…": "正在创建…",
   "Create initiative": "创建项目",
   "Close": "关闭",
   "Something went wrong.": "发生错误。",
+  "You have unsaved changes. Discard them?": "你有未保存的更改，是否放弃？",
   "Gateway returned {status}.": "网关返回了 {status}。",
   "Could not reach {url}. Check the Gateway URL.": "无法连接到 {url}。请检查网关 URL。",
-  "Refreshing": "正在刷新",
+  "Refreshing…": "正在刷新…",
   "Retry": "重试",
   "just now": "刚刚",
   "{count} min ago": "{count} 分钟前",
@@ -282,12 +289,18 @@ export function formatDate(locale: Locale, value: string | null, now = Date.now(
   return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
-export function formatExactDate(value: string | null): string {
+export function formatExactDate(value: string | null, locale: Locale = "en"): string {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  const pad = (number: number) => String(number).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 type I18n = {
