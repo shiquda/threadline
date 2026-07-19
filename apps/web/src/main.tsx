@@ -8,6 +8,15 @@ import type { AuditEvent, Decision, InboxItem, Initiative, InitiativeStatus, Sub
 import { ThreadlineApi, readConnection, writeConnection, type Connection } from "./api.js";
 import { formatDate, formatExactDate, humanize, I18nProvider, supportedLocales, useI18n, type Locale } from "./i18n.js";
 import { initiativeRecord, normalizeWorkboard, type InitiativeRecord } from "./workboard.js";
+import {
+  groupSubmissionsByIdentity,
+  makeAgentsSessionRoute,
+  parseAgentsSessionRoute,
+  selectedSessionRecords,
+  UNKNOWN_HOST,
+  UNKNOWN_SESSION,
+  UNKNOWN_TOOL,
+} from "./agents.js";
 import "./styles.css";
 
 type Page = "overview" | "inbox" | "workboard" | "decisions" | "agents" | "initiative" | "decision" | "submission" | "task";
@@ -17,11 +26,14 @@ type LoadResult<T> = LoadState<T> & { reload: () => void; mutate: (updater: (val
 type Translate = ReturnType<typeof useI18n>["t"];
 
 function routeFromHash(): Route {
-  const [page, id] = window.location.hash.replace(/^#\/?/, "").split("/");
-  if (page === "initiative" && id) return { page: "initiative", id };
-  if (page === "decision" && id) return { page: "decision", id };
-  if (page === "submission" && id) return { page: "submission", id };
-  if (page === "task" && id) return { page: "task", id };
+  const [page, ...rest] = window.location.hash.replace(/^#\/?/, "").split("/");
+  if (page === "initiative" && rest[0]) return { page: "initiative", id: rest[0] };
+  if (page === "decision" && rest[0]) return { page: "decision", id: rest[0] };
+  if (page === "submission" && rest[0]) return { page: "submission", id: rest[0] };
+  if (page === "task" && rest[0]) return { page: "task", id: rest[0] };
+  if (page === "agents" && rest.length === 3) {
+    return { page: "agents", id: rest.join("/") };
+  }
   if (page && ["inbox", "workboard", "decisions", "agents"].includes(page)) return { page: page as Page };
   return { page: "overview" };
 }
@@ -426,28 +438,123 @@ function executionIdentity(submission: Submission): { host: string; tool: string
 
 function AgentsPage({ api }: { api: ThreadlineApi }) {
   const { t } = useI18n();
+  const route = routeFromHash();
   const data = useLoad("agents", (signal) => api.submissions(undefined, signal), [api]);
   const [query, setQuery] = useState("");
+  const [expandedHosts, setExpandedHosts] = useState<Set<string>>(new Set());
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+
   const groups = useMemo(() => {
     const visible = (data.value ?? []).filter((submission) => {
       const identity = executionIdentity(submission);
       return `${identity.host} ${identity.tool} ${identity.session}`.toLowerCase().includes(query.trim().toLowerCase());
     });
-    const result = new Map<string, Map<string, Map<string, Submission[]>>>();
-    for (const submission of visible) {
-      const { host, tool, session } = executionIdentity(submission);
-      const byTool = result.get(host) ?? new Map<string, Map<string, Submission[]>>();
-      const bySession = byTool.get(tool) ?? new Map<string, Submission[]>();
-      bySession.set(session, [...(bySession.get(session) ?? []), submission]);
-      byTool.set(tool, bySession); result.set(host, byTool);
-    }
-    return result;
+    return groupSubmissionsByIdentity(visible);
   }, [data.value, query]);
+
+  const selected = useMemo(() => {
+    if (!route.id) return null;
+    const parsed = parseAgentsSessionRoute(route.id);
+    if (!parsed) return null;
+    const records = selectedSessionRecords(groups, parsed.host, parsed.tool, parsed.session);
+    if (!records) return null;
+    return { ...parsed, records };
+  }, [route.id, groups]);
+
+  useEffect(() => {
+    if (!selected) return;
+    setExpandedHosts((prev) => new Set([...prev, selected.host]));
+    setExpandedTools((prev) => new Set([...prev, toolKey(selected.host, selected.tool)]));
+  }, [selected?.host, selected?.tool, selected?.session]);
+
+  const toggleHost = (host: string) => {
+    setExpandedHosts((prev) => {
+      const next = new Set(prev);
+      if (next.has(host)) next.delete(host);
+      else next.add(host);
+      return next;
+    });
+  };
+
+  const toggleTool = (host: string, tool: string) => {
+    const key = toolKey(host, tool);
+    setExpandedTools((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const selectSession = (host: string, tool: string, session: string) => {
+    navigate(`#${makeAgentsSessionRoute(host, tool, session)}`);
+  };
+
+  const totalHosts = groups.length;
+  const isHostExpanded = (host: string) => expandedHosts.has(host);
+  const isToolExpanded = (host: string, tool: string) => expandedTools.has(toolKey(host, tool));
+
   return <PageHeader title={t("Agents")} subtitle={t("Browse work by execution host, tool, and session.")}>
     <div className="toolbar"><input className="search-input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search host, tool, session...")} aria-label={t("Search agents")} /></div>
-    {data.loading && !data.value ? <SkeletonMiniList /> : data.error && !data.value ? <StateBox title={t("Could not load agents")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : !groups.size ? <StateBox title={t("No matching agents")}>{t("Agent work will appear here.")}</StateBox> : <div className="linked-list">{[...groups.entries()].map(([host, byTool]) => <section className="panel-section" key={host}><h2>{host}</h2>{[...byTool.entries()].map(([tool, bySession]) => <div className="linked-list" key={tool}><div className="linked-row"><strong>{tool}</strong><Badge tone="info">{[...bySession.values()].flat().length}</Badge></div>{[...bySession.entries()].map(([session, submissions]) => <div className="linked-row" key={session}><div><strong>{session}</strong><span>{t("{count} records", { count: submissions.length })}</span></div><div className="item-actions">{submissions.slice(0, 2).map((submission) => <a className="btn btn-secondary btn-sm" href={`#submission/${submission.id}`} key={submission.id}>{t("View")}</a>)}</div></div>)}</div>)}</section>)}</div>}
+    {data.loading && !data.value ? <SkeletonMiniList /> : data.error && !data.value ? <StateBox title={t("Could not load agents")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : !totalHosts ? <StateBox title={t("No matching agents")}>{t("Agent work will appear here.")}</StateBox> : <>
+      <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
+      <div className="agents-layout">
+        <section className="agents-index" aria-label={t("Agents")}>
+          <header className="agents-index-header"><h2>{t("Host / Tool / Session")}</h2><span className="text-muted">{t("{count} hosts", { count: totalHosts })}</span></header>
+          <div className="agents-tree" role="tree">
+            {groups.map((hostNode) => (
+              <div className="agents-host" key={hostNode.host}>
+                <button className={`agents-host-row ${hostNode.host === UNKNOWN_HOST ? "unknown" : ""}`} aria-expanded={isHostExpanded(hostNode.host)} onClick={() => toggleHost(hostNode.host)}>
+                  <ChevronRight size={16} className="chevron" />
+                  <span>{hostNode.host}</span>
+                  <span className="count"><Badge tone="info">{hostNode.tools.reduce((sum, tool) => sum + tool.sessions.reduce((s, session) => s + session.submissions.length, 0), 0)}</Badge></span>
+                </button>
+                {isHostExpanded(hostNode.host) && (
+                  <div className="agents-tool-list" role="group">
+                    {hostNode.tools.map((toolNode) => (
+                      <div className="agents-tool" key={toolNode.tool}>
+                        <button className={`agents-tool-row ${toolNode.tool === UNKNOWN_TOOL ? "unknown" : ""}`} aria-expanded={isToolExpanded(hostNode.host, toolNode.tool)} onClick={() => toggleTool(hostNode.host, toolNode.tool)}>
+                          <ChevronRight size={16} className="chevron" />
+                          <span>{toolNode.tool}</span>
+                          <span className="count"><Badge tone="info">{toolNode.sessions.reduce((sum, session) => sum + session.submissions.length, 0)}</Badge></span>
+                        </button>
+                        {isToolExpanded(hostNode.host, toolNode.tool) && (
+                          <div className="agents-session-list" role="group">
+                            {toolNode.sessions.map((sessionNode) => {
+                              const isSelected = selected?.host === hostNode.host && selected?.tool === toolNode.tool && selected?.session === sessionNode.session;
+                              return <button key={sessionNode.session} className={`agents-session-row ${isSelected ? "selected" : ""} ${sessionNode.session === UNKNOWN_SESSION ? "unknown" : ""}`} aria-current={isSelected ? "true" : undefined} onClick={() => selectSession(hostNode.host, toolNode.tool, sessionNode.session)}>
+                                <span className="session-label">{sessionNode.session}</span>
+                                <span className="session-meta">{t("{count} records", { count: sessionNode.submissions.length })}</span>
+                              </button>;
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="agents-detail" aria-label={t("Session records")}>
+          {!selected ? <div className="state-box agents-detail-empty"><Network aria-hidden="true" /><div><div className="state-title">{t("No session selected")}</div><p>{t("Select a session to view its records.")}</p></div></div> : <>
+            <div className="agents-session-header">
+              <div>
+                <h2>{t("Session records")}</h2>
+                <div className="session-path"><span>{selected.host}</span><span>·</span><span>{selected.tool}</span><span>·</span><CopyValue value={selected.session} /></div>
+              </div>
+              <Badge tone="info">{t("{count} records", { count: selected.records.length })}</Badge>
+            </div>
+            <div className="panel"><div className="panel-body"><ol className="submission-timeline">{selected.records.map((submission) => <SubmissionRow key={submission.id} submission={submission} />)}</ol></div></div>
+          </>}
+        </section>
+      </div>
+    </>}
   </PageHeader>;
 }
+
+function toolKey(host: string, tool: string): string { return `${host}\0${tool}`; }
 
 function InitiativeDetail({ api, id }: { api: ThreadlineApi; id: string }) {
   const { locale, t } = useI18n();
