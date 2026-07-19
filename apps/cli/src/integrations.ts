@@ -194,9 +194,16 @@ export async function removeIntegration(harness: Harness, root?: string, dryRun 
   return { harness, installed: false, target, detail: dryRun ? `Would remove the Threadline adapter at ${target}.` : "Threadline adapter is removed." };
 }
 
-export function environmentLines(harness: Harness, payload: unknown): string[] {
+export function environmentLines(
+  harness: Harness,
+  payload: unknown,
+  nativeSessionId = process.env.CLAUDE_CODE_SESSION_ID,
+): string[] {
   if (harness !== "claude-code" || !payload || typeof payload !== "object") return [];
-  const sessionId = (payload as { session_id?: unknown }).session_id;
+  const payloadSessionId = (payload as { session_id?: unknown }).session_id;
+  const sessionId = typeof nativeSessionId === "string" && nativeSessionId.trim().length > 0
+    ? nativeSessionId
+    : payloadSessionId;
   if (typeof sessionId !== "string" || sessionId.trim().length === 0) return ["THREADLINE_TOOL=claude-code"];
   return [`THREADLINE_SESSION_ID=${shellQuote(sessionId)}`, "THREADLINE_TOOL=claude-code"];
 }

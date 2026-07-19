@@ -65,6 +65,7 @@ describe("Threadline CLI", () => {
     // must be opt-in per test so they do not leak into unscoped assertions.
     delete env.CODEX_THREAD_ID;
     delete env.CODEX_SESSION_ID;
+    delete env.CLAUDE_CODE_SESSION_ID;
     const result = await execFileAsync(process.execPath, [cli, "--json", ...args], {
       env: { ...env, ...environment },
     });
@@ -320,6 +321,21 @@ describe("Threadline CLI", () => {
       "Blank input is unscoped.",
     ], false, { THREADLINE_SESSION_ID: "   " })) as { context: { session_id?: string } };
     expect(blank.context.session_id).toBeUndefined();
+  });
+
+  it("uses Claude Code's native shell session ID when its hook environment is unavailable", async () => {
+    const native = (await run([
+      "--dry-run",
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "Native Claude session",
+      "--summary",
+      "The Claude shell session is preserved.",
+    ], false, { CLAUDE_CODE_SESSION_ID: "claude-native-session" })) as { context: { tool?: string; session_id?: string } };
+    expect(native.context).toMatchObject({ tool: "claude-code", session_id: "claude-native-session" });
   });
 
   it("explains deterministic dry-run writes and completion records delivery plus state", async () => {

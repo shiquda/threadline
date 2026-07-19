@@ -44,6 +44,13 @@ describe("harness integrations", () => {
     expect(environmentLines("claude-code", { session_id: "  " })).toEqual(["THREADLINE_TOOL=claude-code"]);
   });
 
+  it("prefers Claude's process-native session ID over a transient hook payload", () => {
+    expect(environmentLines("claude-code", { session_id: "hook-session" }, "native-session")).toEqual([
+      "THREADLINE_SESSION_ID='native-session'",
+      "THREADLINE_TOOL=claude-code",
+    ]);
+  });
+
   it("keeps OpenCode and OpenClaw adapters as removable managed files", async () => {
     const directory = await root();
     for (const harness of ["opencode", "openclaw"] as const) {

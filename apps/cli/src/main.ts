@@ -95,6 +95,7 @@ function output(value: unknown): void {
 
 function detectRuntime(): string | undefined {
   if (process.env.CODEX_THREAD_ID || process.env.CODEX_SESSION_ID) return "codex";
+  if (process.env.CLAUDE_CODE_SESSION_ID) return "claude-code";
   if (process.env.CODEX_HOME) return "codex";
   if (process.env.CLAUDE_CODE || process.env.CLAUDE_PROJECT_DIR) return "claude-code";
   if (process.env.CURSOR_TRACE_ID) return "cursor";
@@ -115,10 +116,12 @@ async function resolveContext(): Promise<ResolvedContext> {
   const persisted = config.context ?? {};
   const runtime = firstDefined(options.runtime, process.env.THREADLINE_RUNTIME, persisted.runtime, detectRuntime());
   const nativeCodexSession = firstDefined(process.env.CODEX_THREAD_ID, process.env.CODEX_SESSION_ID);
+  const nativeClaudeSession = firstDefined(process.env.CLAUDE_CODE_SESSION_ID);
   const tool = firstDefined(
     options.tool,
     process.env.THREADLINE_TOOL,
     nativeCodexSession ? "codex" : undefined,
+    nativeClaudeSession ? "claude-code" : undefined,
     persisted.tool,
     runtime,
   );
@@ -129,6 +132,7 @@ async function resolveContext(): Promise<ResolvedContext> {
     process.env.THREADLINE_SESSION_ID,
     process.env.CODEX_THREAD_ID,
     process.env.CODEX_SESSION_ID,
+    process.env.CLAUDE_CODE_SESSION_ID,
     process.env.CLAUDE_SESSION_ID,
     persisted.sessionId,
   );
