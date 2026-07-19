@@ -12,6 +12,24 @@ export const InitiativeStatusSchema = Type.Union([
   Type.Literal("cancelled"),
 ]);
 
+export const InitiativeLifecycleSchema = Type.Union([
+  Type.Literal("open"),
+  Type.Literal("done"),
+]);
+
+export const InitiativeBlockerSchema = Type.Union([
+  Type.Literal("none"),
+  Type.Literal("human"),
+  Type.Literal("external"),
+  Type.Literal("failed"),
+]);
+
+export const InitiativeOwnerSchema = Type.Union([
+  Type.Literal("human"),
+  Type.Literal("agent"),
+  Type.Literal("none"),
+]);
+
 export const SubmissionKindSchema = Type.Union([
   Type.Literal("delivery"),
   Type.Literal("recommendation"),
@@ -73,6 +91,10 @@ export const InitiativeSchema = Type.Object({
   intent: Type.String(),
   status: InitiativeStatusSchema,
   next_step: Type.Union([Type.String(), Type.Null()]),
+  lifecycle: InitiativeLifecycleSchema,
+  blocker: InitiativeBlockerSchema,
+  owner: InitiativeOwnerSchema,
+  next_action: Type.Union([Type.String(), Type.Null()]),
   created_at: Type.String(),
   updated_at: Type.String(),
   last_activity_at: Type.String(),
@@ -86,6 +108,8 @@ export const SubmissionSchema = Type.Object({
   summary: Type.String(),
   detail: Type.Union([Type.String(), Type.Null()]),
   detail_ref: Type.Union([Type.String(), Type.Null()]),
+  content_language: Type.String(),
+  evidence_refs: Type.Array(Type.String()),
   initiative_id: Type.Union([Type.String(), Type.Null()]),
   attention_policy: AttentionPolicySchema,
   dedupe_key: Type.Union([Type.String(), Type.Null()]),
@@ -152,9 +176,23 @@ export const CreateInitiativeInputSchema = Type.Object(
     intent: Type.String({ minLength: 1, maxLength: 5000 }),
     status: Type.Optional(InitiativeStatusSchema),
     next_step: nullableOptional(Type.String({ maxLength: 2000 })),
+    lifecycle: Type.Optional(InitiativeLifecycleSchema),
+    blocker: Type.Optional(InitiativeBlockerSchema),
+    owner: Type.Optional(InitiativeOwnerSchema),
+    next_action: nullableOptional(Type.String({ maxLength: 2000 })),
     actor: ActorContextSchema,
   },
   { additionalProperties: false },
+);
+
+export const InitiativeStateUpdateInputSchema = Type.Object(
+  {
+    lifecycle: Type.Optional(InitiativeLifecycleSchema),
+    blocker: Type.Optional(InitiativeBlockerSchema),
+    owner: Type.Optional(InitiativeOwnerSchema),
+    next_action: nullableOptional(Type.String({ maxLength: 2000 })),
+  },
+  { additionalProperties: false, minProperties: 1 },
 );
 
 export const UpdateInitiativeInputSchema = Type.Object(
@@ -163,6 +201,10 @@ export const UpdateInitiativeInputSchema = Type.Object(
     intent: Type.Optional(Type.String({ minLength: 1, maxLength: 5000 })),
     status: Type.Optional(InitiativeStatusSchema),
     next_step: nullableOptional(Type.String({ maxLength: 2000 })),
+    lifecycle: Type.Optional(InitiativeLifecycleSchema),
+    blocker: Type.Optional(InitiativeBlockerSchema),
+    owner: Type.Optional(InitiativeOwnerSchema),
+    next_action: nullableOptional(Type.String({ maxLength: 2000 })),
     actor: ActorContextSchema,
   },
   { additionalProperties: false, minProperties: 2 },
@@ -184,7 +226,18 @@ export const CreateSubmissionInputSchema = Type.Object(
     summary: Type.String({ minLength: 1, maxLength: 5000 }),
     detail: nullableOptional(Type.String({ maxLength: 50000 })),
     detail_ref: nullableOptional(Type.String({ maxLength: 2000 })),
+    content_language: Type.Optional(
+      Type.String({
+        minLength: 2,
+        maxLength: 100,
+        pattern: "^(?:[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*|x(?:-[A-Za-z0-9]{1,8})+)$",
+      }),
+    ),
+    evidence_refs: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), { maxItems: 100 }),
+    ),
     initiative_id: nullableOptional(Type.String()),
+    initiative_update: Type.Optional(InitiativeStateUpdateInputSchema),
     attention_policy: AttentionPolicySchema,
     dedupe_key: nullableOptional(Type.String({ maxLength: 500 })),
     observed: Type.Optional(Type.Boolean()),
@@ -230,6 +283,9 @@ export const InboxItemSchema = Type.Object({
 });
 
 export const WorkboardSchema = Type.Object({
+  ready: Type.Array(InitiativeSchema),
+  waiting: Type.Array(InitiativeSchema),
+  done: Type.Array(InitiativeSchema),
   active: Type.Array(InitiativeSchema),
   waiting_for_jim: Type.Array(InitiativeSchema),
   waiting_for_agent: Type.Array(InitiativeSchema),
@@ -243,6 +299,9 @@ export const ErrorResponseSchema = Type.Object({
 });
 
 export type InitiativeStatus = Static<typeof InitiativeStatusSchema>;
+export type InitiativeLifecycle = Static<typeof InitiativeLifecycleSchema>;
+export type InitiativeBlocker = Static<typeof InitiativeBlockerSchema>;
+export type InitiativeOwner = Static<typeof InitiativeOwnerSchema>;
 export type SubmissionKind = Static<typeof SubmissionKindSchema>;
 export type AttentionPolicy = Static<typeof AttentionPolicySchema>;
 export type DecisionStatus = Static<typeof DecisionStatusSchema>;
@@ -255,6 +314,7 @@ export type Decision = Static<typeof DecisionSchema>;
 export type Notification = Static<typeof NotificationSchema>;
 export type AuditEvent = Static<typeof AuditEventSchema>;
 export type CreateInitiativeInput = Static<typeof CreateInitiativeInputSchema>;
+export type InitiativeStateUpdateInput = Static<typeof InitiativeStateUpdateInputSchema>;
 export type UpdateInitiativeInput = Static<typeof UpdateInitiativeInputSchema>;
 export type CreateSubmissionInput = Static<typeof CreateSubmissionInputSchema>;
 export type ResolveDecisionInput = Static<typeof ResolveDecisionInputSchema>;

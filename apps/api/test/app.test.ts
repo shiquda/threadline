@@ -291,4 +291,82 @@ describe("Threadline API decision loop", () => {
     const saved = await app.inject({ method: "GET", url: "/api/v1/submissions", headers: authorization });
     expect(saved.json()).toMatchObject([{ kind: "alert" }]);
   });
+
+  it("accepts additive core state and evidence payloads for CLI clients", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/initiatives",
+      headers: authorization,
+      payload: {
+        title: "Reconcile external release state",
+        intent: "Represent a deterministic workboard lane.",
+        lifecycle: "open",
+        blocker: "none",
+        owner: "agent",
+        next_action: "Collect verification evidence",
+        actor,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const initiative = created.json<{ id: string }>();
+    expect(created.json()).toMatchObject({
+      lifecycle: "open",
+      blocker: "none",
+      owner: "agent",
+      next_action: "Collect verification evidence",
+    });
+
+    const submissionPayload = {
+      kind: "progress_update",
+      title: "External release is pending",
+      summary: "A third-party verification must complete first.",
+      content_language: "en-GB",
+      evidence_refs: ["https://example.test/releases/42", "run:verification-42"],
+      initiative_id: initiative.id,
+      initiative_update: {
+        blocker: "external",
+        owner: "none",
+        next_action: "Poll the release verification",
+      },
+      attention_policy: "record_only",
+      actor,
+    };
+    const submitted = await app.inject({
+      method: "POST",
+      url: "/api/v1/submissions",
+      headers: { ...authorization, "idempotency-key": "release-42" },
+      payload: submissionPayload,
+    });
+    expect(submitted.statusCode).toBe(201);
+    expect(submitted.json()).toMatchObject({
+      submission: { content_language: "en-GB", evidence_refs: submissionPayload.evidence_refs },
+    });
+
+    const retry = await app.inject({
+      method: "POST",
+      url: "/api/v1/submissions",
+      headers: { ...authorization, "idempotency-key": "release-42" },
+      payload: submissionPayload,
+    });
+    expect(retry.json()).toEqual(submitted.json());
+
+    const workboard = await app.inject({
+      method: "GET",
+      url: "/api/v1/workboard",
+      headers: authorization,
+    });
+    expect(workboard.json()).toMatchObject({
+      waiting: [{ id: initiative.id, blocker: "external", owner: "none" }],
+      ready: [],
+      done: [],
+    });
+
+    const invalidLanguage = await app.inject({
+      method: "POST",
+      url: "/api/v1/submissions",
+      headers: authorization,
+      payload: { ...submissionPayload, content_language: "en_US" },
+    });
+    expect(invalidLanguage.statusCode).toBe(400);
+  });
 });

@@ -9,6 +9,9 @@ import type {
   DecisionStatus,
   InboxItem,
   Initiative,
+  InitiativeBlocker,
+  InitiativeLifecycle,
+  InitiativeOwner,
   InitiativeStatus,
   Notification,
   ResolveDecisionInput,
@@ -21,6 +24,7 @@ import type {
 import { migrate } from "./migrations.js";
 
 type DecisionRow = Omit<Decision, "options"> & { options_json: string | null };
+type SubmissionRow = Omit<Submission, "evidence_refs"> & { evidence_refs_json: string };
 type EventRow = Omit<AuditEvent, "payload"> & { payload_json: string | null };
 type IdempotencyRow = {
   operation: string;
@@ -55,6 +59,69 @@ function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+type InitiativeStatePatch = {
+  lifecycle?: InitiativeLifecycle;
+  blocker?: InitiativeBlocker;
+  owner?: InitiativeOwner;
+  next_action?: string | null;
+  status?: InitiativeStatus;
+  next_step?: string | null;
+};
+
+function stateForStatus(status: InitiativeStatus): Pick<
+  Initiative,
+  "lifecycle" | "blocker" | "owner"
+> {
+  switch (status) {
+    case "waiting_for_jim":
+      return { lifecycle: "open", blocker: "human", owner: "human" };
+    case "paused":
+      return { lifecycle: "open", blocker: "external", owner: "none" };
+    case "completed":
+    case "cancelled":
+      return { lifecycle: "done", blocker: "none", owner: "none" };
+    case "waiting_for_agent":
+    case "active":
+      return { lifecycle: "open", blocker: "none", owner: "agent" };
+  }
+}
+
+function hasSemanticState(input: InitiativeStatePatch): boolean {
+  return ["lifecycle", "blocker", "owner", "next_action"].some((key) => hasOwn(input, key));
+}
+
+function legacyStatusFor(
+  state: Pick<Initiative, "lifecycle" | "blocker" | "owner">,
+  priorStatus: InitiativeStatus | undefined,
+): InitiativeStatus {
+  if (state.lifecycle === "done") return "completed";
+  if (state.blocker === "human") return "waiting_for_jim";
+  if (state.blocker === "external" || state.blocker === "failed" || state.owner === "none") {
+    return "paused";
+  }
+  return priorStatus === "waiting_for_agent" ? "waiting_for_agent" : "active";
+}
+
+function deriveInitiativeState(
+  current: Initiative | undefined,
+  input: InitiativeStatePatch,
+): Pick<Initiative, "status" | "lifecycle" | "blocker" | "owner" | "next_step" | "next_action"> {
+  const baseStatus = input.status ?? current?.status ?? "active";
+  const base = input.status ? stateForStatus(input.status) : current ?? stateForStatus(baseStatus);
+  const lifecycle = input.lifecycle ?? base.lifecycle;
+  const blocker = input.blocker ?? base.blocker;
+  const owner = input.owner ?? base.owner;
+  const nextAction = hasOwn(input, "next_action")
+    ? input.next_action ?? null
+    : hasOwn(input, "next_step")
+      ? input.next_step ?? null
+      : current?.next_action ?? current?.next_step ?? null;
+  const status = !hasSemanticState(input) && input.status
+    ? input.status
+    : legacyStatusFor({ lifecycle, blocker, owner }, input.status ?? current?.status ?? baseStatus);
+  return { status, lifecycle, blocker, owner, next_step: nextAction, next_action: nextAction };
+}
+
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
   if (value && typeof value === "object") {
@@ -85,12 +152,12 @@ export class ThreadlineStore {
     if (cached) return cached;
 
     const timestamp = now();
+    const state = deriveInitiativeState(undefined, input);
     const initiative: Initiative = {
       id: randomUUID(),
       title: input.title,
       intent: input.intent,
-      status: input.status ?? "active",
-      next_step: input.next_step ?? null,
+      ...state,
       created_at: timestamp,
       updated_at: timestamp,
       last_activity_at: timestamp,
@@ -101,13 +168,17 @@ export class ThreadlineStore {
       this.db
         .prepare(
           `INSERT INTO initiatives
-           (id, title, intent, status, next_step, created_at, updated_at, last_activity_at, created_by)
-           VALUES (@id, @title, @intent, @status, @next_step, @created_at, @updated_at,
-                   @last_activity_at, @created_by)`,
+           (id, title, intent, status, next_step, lifecycle, blocker, owner, next_action,
+            created_at, updated_at, last_activity_at, created_by)
+           VALUES (@id, @title, @intent, @status, @next_step, @lifecycle, @blocker, @owner,
+                   @next_action, @created_at, @updated_at, @last_activity_at, @created_by)`,
         )
         .run(initiative);
       this.writeEvent("initiative", initiative.id, "initiative.created", input.actor, {
         status: initiative.status,
+        lifecycle: initiative.lifecycle,
+        blocker: initiative.blocker,
+        owner: initiative.owner,
       });
       this.writeIdempotent(idempotencyKey, "initiative.create", input, initiative);
     });
@@ -139,12 +210,12 @@ export class ThreadlineStore {
   updateInitiative(id: string, input: UpdateInitiativeInput): Initiative {
     const current = this.getInitiative(id);
     const timestamp = now();
+    const state = deriveInitiativeState(current, input);
     const updated: Initiative = {
       ...current,
       title: input.title ?? current.title,
       intent: input.intent ?? current.intent,
-      status: input.status ?? current.status,
-      next_step: hasOwn(input, "next_step") ? (input.next_step ?? null) : current.next_step,
+      ...state,
       updated_at: timestamp,
       last_activity_at: timestamp,
     };
@@ -154,13 +225,17 @@ export class ThreadlineStore {
         .prepare(
           `UPDATE initiatives
            SET title = @title, intent = @intent, status = @status, next_step = @next_step,
+               lifecycle = @lifecycle, blocker = @blocker, owner = @owner, next_action = @next_action,
                updated_at = @updated_at, last_activity_at = @last_activity_at
            WHERE id = @id`,
         )
         .run(updated);
       this.writeEvent("initiative", id, "initiative.updated", input.actor, {
         status: updated.status,
-        next_step: updated.next_step,
+        lifecycle: updated.lifecycle,
+        blocker: updated.blocker,
+        owner: updated.owner,
+        next_action: updated.next_action,
       });
     });
     write();
@@ -181,6 +256,9 @@ export class ThreadlineStore {
     if (input.kind !== "decision_request" && input.decision) {
       throw new StoreError("invalid_request", "Only decision_request may include decision data");
     }
+    if (input.initiative_update && !input.initiative_id) {
+      throw new StoreError("invalid_request", "initiative_update requires initiative_id");
+    }
     if (input.initiative_id) {
       this.getInitiative(input.initiative_id);
     }
@@ -200,6 +278,8 @@ export class ThreadlineStore {
         summary: input.summary,
         detail: input.detail ?? null,
         detail_ref: input.detail_ref ?? null,
+        content_language: input.content_language ?? "und",
+        evidence_refs: input.evidence_refs ?? [],
         initiative_id: input.initiative_id ?? null,
         attention_policy: input.attention_policy,
         dedupe_key: input.dedupe_key ?? null,
@@ -214,13 +294,14 @@ export class ThreadlineStore {
       this.db
         .prepare(
           `INSERT INTO submissions
-           (id, kind, title, summary, detail, detail_ref, initiative_id, attention_policy,
+           (id, kind, title, summary, detail, detail_ref, content_language, evidence_refs_json,
+            initiative_id, attention_policy,
             dedupe_key, source, runtime, agent, session_id, observed_at, created_at, created_by)
-           VALUES (@id, @kind, @title, @summary, @detail, @detail_ref, @initiative_id,
-                   @attention_policy, @dedupe_key, @source, @runtime, @agent, @session_id,
-                   @observed_at, @created_at, @created_by)`,
+           VALUES (@id, @kind, @title, @summary, @detail, @detail_ref, @content_language,
+                   @evidence_refs_json, @initiative_id, @attention_policy, @dedupe_key, @source,
+                   @runtime, @agent, @session_id, @observed_at, @created_at, @created_by)`,
         )
-        .run(submission);
+        .run({ ...submission, evidence_refs_json: JSON.stringify(submission.evidence_refs) });
 
       let decision: Decision | null = null;
       if (input.decision) {
@@ -273,30 +354,46 @@ export class ThreadlineStore {
 
       if (submission.initiative_id) {
         const initiativeBefore = this.getInitiative(submission.initiative_id);
-        const initiativeStatus =
+        const impliedState: InitiativeStatePatch | undefined =
           submission.kind === "decision_request" &&
           ["active", "waiting_for_agent"].includes(initiativeBefore.status)
-            ? "waiting_for_jim"
-            : initiativeBefore.status;
-        this.db
-          .prepare(
-            `UPDATE initiatives
-             SET status = CASE
-                   WHEN ? = 'decision_request' AND status IN ('active', 'waiting_for_agent')
-                     THEN 'waiting_for_jim'
-                   ELSE status
-                 END,
-                 last_activity_at = ?, updated_at = ?
-             WHERE id = ?`,
-          )
-          .run(submission.kind, timestamp, timestamp, submission.initiative_id);
-        if (initiativeStatus !== initiativeBefore.status) {
+            ? { status: "waiting_for_jim", blocker: "human", owner: "human" }
+            : undefined;
+        const statePatch = input.initiative_update ?? impliedState;
+        if (statePatch) {
+          const state = deriveInitiativeState(initiativeBefore, statePatch);
+          this.db
+            .prepare(
+              `UPDATE initiatives
+               SET status = ?, next_step = ?, lifecycle = ?, blocker = ?, owner = ?, next_action = ?,
+                   last_activity_at = ?, updated_at = ?
+               WHERE id = ?`,
+            )
+            .run(
+              state.status,
+              state.next_step,
+              state.lifecycle,
+              state.blocker,
+              state.owner,
+              state.next_action,
+              timestamp,
+              timestamp,
+              submission.initiative_id,
+            );
           this.writeEvent(
             "initiative",
             submission.initiative_id,
-            "initiative.waiting_for_jim",
+            "initiative.state_derived",
             input.actor,
-            { previous_status: initiativeBefore.status, status: initiativeStatus },
+            {
+              previous_status: initiativeBefore.status,
+              status: state.status,
+              lifecycle: state.lifecycle,
+              blocker: state.blocker,
+              owner: state.owner,
+              next_action: state.next_action,
+              source_submission_id: submission.id,
+            },
           );
         }
       }
@@ -340,19 +437,22 @@ export class ThreadlineStore {
 
   getSubmission(id: string): Submission {
     const row = this.db.prepare("SELECT * FROM submissions WHERE id = ?").get(id) as
-      | Submission
+      | SubmissionRow
       | undefined;
     if (!row) throw new StoreError("not_found", `Submission ${id} was not found`);
-    return row;
+    return this.mapSubmission(row);
   }
 
   listSubmissions(initiativeId?: string): Submission[] {
     if (initiativeId) {
-      return this.db
-        .prepare("SELECT * FROM submissions WHERE initiative_id = ? ORDER BY created_at DESC")
-        .all(initiativeId) as Submission[];
+      return (
+        this.db
+          .prepare("SELECT * FROM submissions WHERE initiative_id = ? ORDER BY created_at DESC")
+          .all(initiativeId) as SubmissionRow[]
+      ).map((row) => this.mapSubmission(row));
     }
-    return this.db.prepare("SELECT * FROM submissions ORDER BY created_at DESC").all() as Submission[];
+    return (this.db.prepare("SELECT * FROM submissions ORDER BY created_at DESC").all() as SubmissionRow[])
+      .map((row) => this.mapSubmission(row));
   }
 
   getDecision(id: string): Decision {
@@ -439,21 +539,43 @@ export class ThreadlineStore {
       }
       if (current.initiative_id) {
         const initiativeBefore = this.getInitiative(current.initiative_id);
+        const state = deriveInitiativeState(initiativeBefore, {
+          status: "waiting_for_agent",
+          blocker: "none",
+          owner: "agent",
+        });
         this.db
           .prepare(
             `UPDATE initiatives
-             SET status = CASE WHEN status = 'waiting_for_jim' THEN 'waiting_for_agent' ELSE status END,
+             SET status = ?, next_step = ?, lifecycle = ?, blocker = ?, owner = ?, next_action = ?,
                  last_activity_at = ?, updated_at = ?
              WHERE id = ?`,
           )
-          .run(timestamp, timestamp, current.initiative_id);
+          .run(
+            state.status,
+            state.next_step,
+            state.lifecycle,
+            state.blocker,
+            state.owner,
+            state.next_action,
+            timestamp,
+            timestamp,
+            current.initiative_id,
+          );
         if (initiativeBefore.status === "waiting_for_jim") {
           this.writeEvent(
             "initiative",
             current.initiative_id,
-            "initiative.waiting_for_agent",
+            "initiative.state_derived",
             input.actor,
-            { previous_status: "waiting_for_jim", status: "waiting_for_agent" },
+            {
+              previous_status: "waiting_for_jim",
+              status: state.status,
+              lifecycle: state.lifecycle,
+              blocker: state.blocker,
+              owner: state.owner,
+              source_decision_id: id,
+            },
           );
         }
       }
@@ -530,6 +652,13 @@ export class ThreadlineStore {
   getWorkboard(): Workboard {
     const initiatives = this.listInitiatives();
     return {
+      ready: initiatives.filter(
+        (item) => item.lifecycle === "open" && item.blocker === "none" && item.owner !== "none",
+      ),
+      waiting: initiatives.filter(
+        (item) => item.lifecycle === "open" && (item.blocker !== "none" || item.owner === "none"),
+      ),
+      done: initiatives.filter((item) => item.lifecycle === "done"),
       active: initiatives.filter((item) => item.status === "active"),
       waiting_for_jim: initiatives.filter((item) => item.status === "waiting_for_jim"),
       waiting_for_agent: initiatives.filter((item) => item.status === "waiting_for_agent"),
@@ -561,6 +690,14 @@ export class ThreadlineStore {
     return {
       ...decision,
       options: options_json ? (JSON.parse(options_json) as string[]) : null,
+    };
+  }
+
+  private mapSubmission(row: SubmissionRow): Submission {
+    const { evidence_refs_json, ...submission } = row;
+    return {
+      ...submission,
+      evidence_refs: JSON.parse(evidence_refs_json) as string[],
     };
   }
 

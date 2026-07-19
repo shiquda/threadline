@@ -9,6 +9,8 @@ const submission: Submission = {
   summary: "A deployment region is required.",
   detail: null,
   detail_ref: null,
+  content_language: "en",
+  evidence_refs: [],
   initiative_id: null,
   attention_policy: "inbox",
   dedupe_key: null,

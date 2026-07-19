@@ -93,6 +93,34 @@ const migrations = [
       CREATE INDEX idx_audit_entity ON audit_events(entity_type, entity_id, created_at ASC);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE initiatives ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'open';
+      ALTER TABLE initiatives ADD COLUMN blocker TEXT NOT NULL DEFAULT 'none';
+      ALTER TABLE initiatives ADD COLUMN owner TEXT NOT NULL DEFAULT 'agent';
+      ALTER TABLE initiatives ADD COLUMN next_action TEXT;
+      ALTER TABLE submissions ADD COLUMN content_language TEXT NOT NULL DEFAULT 'und';
+      ALTER TABLE submissions ADD COLUMN evidence_refs_json TEXT NOT NULL DEFAULT '[]';
+
+      UPDATE initiatives
+      SET lifecycle = CASE WHEN status IN ('completed', 'cancelled') THEN 'done' ELSE 'open' END,
+          blocker = CASE
+            WHEN status = 'waiting_for_jim' THEN 'human'
+            WHEN status = 'paused' THEN 'external'
+            ELSE 'none'
+          END,
+          owner = CASE
+            WHEN status = 'waiting_for_jim' THEN 'human'
+            WHEN status IN ('completed', 'cancelled', 'paused') THEN 'none'
+            ELSE 'agent'
+          END,
+          next_action = next_step;
+
+      CREATE INDEX idx_initiatives_projection
+        ON initiatives(lifecycle, blocker, owner, last_activity_at DESC);
+    `,
+  },
 ] as const;
 
 export function migrate(db: Database.Database): void {
