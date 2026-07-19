@@ -142,6 +142,7 @@ textarea { resize: vertical; }
 .panel-section + .panel-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
 .panel-section h2 { margin-bottom: 10px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
 .detail-copy { max-width: 75ch; line-height: 1.55; text-wrap: pretty; }
+.submission-detail { white-space: pre-wrap; }
 .linked-list { overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-input); }
 .linked-row { display: flex; align-items: start; justify-content: space-between; gap: 16px; padding: 12px; border-bottom: 1px solid var(--border); }
 .linked-row:last-child { border-bottom: 0; }

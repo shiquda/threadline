@@ -62,6 +62,7 @@ export class ThreadlineApi {
   submissions(initiativeId?: string) {
     return this.request<Submission[]>(`/api/v1/submissions${initiativeId ? `?initiative_id=${encodeURIComponent(initiativeId)}` : ""}`);
   }
+  submission(id: string) { return this.request<Submission>(`/api/v1/submissions/${id}`); }
   decisions() { return this.request<Decision[]>("/api/v1/decisions"); }
   decision(id: string) { return this.request<Decision>(`/api/v1/decisions/${id}`); }
   events(entityType?: string, entityId?: string) {
