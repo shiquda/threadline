@@ -63,6 +63,7 @@ describe("Telegram notification publisher", () => {
         inline_keyboard: [[{ text: "Open decision", url: "https://tl.example.com/#decision/decision-1" }]],
       },
     });
+    expect(JSON.parse(request.body as string).text).toContain("🧭");
   });
 
   it("escapes submission content before sending HTML", async () => {

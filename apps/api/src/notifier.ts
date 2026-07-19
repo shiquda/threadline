@@ -51,7 +51,7 @@ function messageFor(event: NotificationEvent): string {
       ? `\n<b>Options</b>: ${event.decision.options.map(escapeHtml).join(" | ")}`
       : "";
     return [
-      "<b>New decision</b>",
+      "<b>🧭 New decision</b>",
       `<b>${escapeHtml(event.submission.title)}</b>`,
       escapeHtml(event.decision.question),
       options.trim(),
@@ -61,7 +61,7 @@ function messageFor(event: NotificationEvent): string {
       .join("\n");
   }
 
-  return ["<b>Alert</b>", `<b>${escapeHtml(event.submission.title)}</b>`, escapeHtml(event.submission.summary), context.join("\n")]
+  return ["<b>⚠️ Alert</b>", `<b>${escapeHtml(event.submission.title)}</b>`, escapeHtml(event.submission.summary), context.join("\n")]
     .filter(Boolean)
     .join("\n");
 }
