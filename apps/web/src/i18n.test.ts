@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLocale, formatDate, resolveLocale, translate } from "./i18n.js";
+import { detectLocale, formatDate, formatExactDate, resolveLocale, translate } from "./i18n.js";
 
 describe("Web I18N", () => {
   it("selects Simplified Chinese for Chinese browser locales", () => {
@@ -27,5 +27,10 @@ describe("Web I18N", () => {
     const thirtyMinutesAgo = new Date(now - 30 * 60 * 1000).toISOString();
     expect(formatDate("zh-CN", thirtyMinutesAgo, now)).toBe("30 分钟前");
     expect(formatDate("en", thirtyMinutesAgo, now)).toBe("30 min ago");
+  });
+
+  it("formats timestamps with date and minute precision", () => {
+    expect(formatExactDate("2026-07-19T02:05:42.000Z")).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(formatExactDate(null)).toBe("-");
   });
 });

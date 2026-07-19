@@ -166,6 +166,21 @@ textarea { resize: vertical; }
 .linked-row > div { min-width: 0; }
 .linked-row strong { font-size: 14px; line-height: 1.35; text-wrap: pretty; overflow-wrap: anywhere; }
 .linked-row span { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.4; text-wrap: pretty; overflow-wrap: anywhere; }
+.submission-timeline { position: relative; display: grid; gap: 0; margin: 0; padding: 0 0 0 20px; list-style: none; }
+.submission-timeline::before { position: absolute; top: 17px; bottom: 17px; left: 6px; width: 2px; background: var(--border); content: ""; }
+.submission-timeline li { position: relative; min-width: 0; }
+.submission-timeline li::before { position: absolute; top: 17px; left: -17px; z-index: 1; width: 7px; height: 7px; border: 2px solid var(--muted); border-radius: 50%; background: var(--bg); content: ""; }
+.submission-timeline li:first-child::before { border-color: var(--fg); background: var(--fg); }
+.submission-timeline-item { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); transition: background 150ms ease; }
+.submission-timeline li:last-child .submission-timeline-item { padding-bottom: 0; border-bottom: 0; }
+.submission-timeline-item:hover .submission-timeline-content { background: var(--surface); }
+.submission-timeline-item time { display: grid; align-content: start; gap: 2px; color: var(--muted); font-family: var(--mono); font-size: 11px; line-height: 1.35; }
+.submission-timeline-item time span:first-child { color: var(--fg); font-weight: 700; }
+.submission-timeline-content { display: flex; align-items: start; justify-content: space-between; gap: 12px; min-width: 0; margin: -6px -8px; padding: 6px 8px; border-radius: var(--r-input); transition: background 150ms ease; }
+.submission-timeline-content > div { min-width: 0; }
+.submission-timeline-content strong, .submission-timeline-content span { display: block; }
+.submission-timeline-content strong { font-size: 14px; line-height: 1.35; text-wrap: pretty; overflow-wrap: anywhere; }
+.submission-timeline-content > div > span { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.4; text-wrap: pretty; overflow-wrap: anywhere; }
 .properties { margin: 0; }
 .properties > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .properties > div:last-child { border-bottom: 0; }
@@ -258,6 +273,7 @@ textarea { resize: vertical; }
   .item-actions { opacity: 1; }
   .item-kind { min-height: 0; }
   .board { grid-template-columns: 1fr; }
+  .submission-timeline-item { grid-template-columns: 1fr; gap: 7px; }
   .properties > div { grid-template-columns: 90px minmax(0, 1fr); }
   .skeleton-property { grid-template-columns: 90px minmax(0, 1fr); }
 }
