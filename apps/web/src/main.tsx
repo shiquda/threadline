@@ -206,7 +206,7 @@ function InitiativeCard({ initiative }: { initiative: Initiative }) {
 function DecisionsPage({ api }: { api: ThreadlineApi }) {
   const { t } = useI18n();
   const data = useLoad(() => Promise.all([api.decisions(), api.initiatives()]), [api]);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("open");
   const [decisions, initiatives] = data.value ?? [[], []] as [Decision[], Initiative[]];
   const initiativeNames = new Map(initiatives.map((item) => [item.id, item.title]));
   const visible = decisions.filter((decision) => filter === "all" || (filter === "open" ? ["open", "seen"].includes(decision.status) : decision.status === "resolved"));
