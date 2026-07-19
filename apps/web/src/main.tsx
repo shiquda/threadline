@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive, Check, ChevronRight, ClipboardList, Clock3, Copy, Inbox,
@@ -7,6 +7,7 @@ import {
 import type { AuditEvent, Decision, InboxItem, Initiative, InitiativeStatus, Submission, Task, Workboard } from "@threadline/protocol";
 import { ThreadlineApi, readConnection, writeConnection, type Connection } from "./api.js";
 import { formatDate, formatExactDate, humanize, I18nProvider, supportedLocales, useI18n, type Locale } from "./i18n.js";
+import { applyHashParams, hashWithParams } from "./url-params.js";
 import { initiativeRecord, normalizeWorkboard, uniqueInitiativeIds, type InitiativeRecord, type WorkboardLane } from "./workboard.js";
 import {
   groupSubmissionsByIdentity,
@@ -49,28 +50,12 @@ function parseHash(): { path: string; params: URLSearchParams } {
 }
 
 function setHashParams(path: string, params: URLSearchParams, push = false): void {
-  const query = params.toString();
-  const hash = query ? `#${path}?${query}` : `#${path}`;
+  const hash = hashWithParams(path, params);
   if (push) {
     window.history.pushState(null, "", hash);
   } else {
     window.history.replaceState(null, "", hash);
   }
-}
-
-function readHashParam(key: string): string | null {
-  const value = parseHash().params.get(key);
-  return value;
-}
-
-function writeHashParam(key: string, value: string | null, push = false): void {
-  const { path, params } = parseHash();
-  if (value === null || value === "" || value === "all") {
-    params.delete(key);
-  } else {
-    params.set(key, value);
-  }
-  setHashParams(path, params, push);
 }
 
 function useHashParams(): [URLSearchParams, (next: Record<string, string | null>, push?: boolean) => void] {
@@ -86,12 +71,9 @@ function useHashParams(): [URLSearchParams, (next: Record<string, string | null>
   }, []);
   const write = useCallback((next: Record<string, string | null>, push = false) => {
     const { path, params } = parseHash();
-    for (const [key, value] of Object.entries(next)) {
-      if (value === null || value === "" || value === "all") params.delete(key);
-      else params.set(key, value);
-    }
-    setHashParams(path, params, push);
-    setParams(new URLSearchParams(params));
+    const updated = applyHashParams(params, next);
+    setHashParams(path, updated, push);
+    setParams(new URLSearchParams(updated));
   }, []);
   return [params, write];
 }
@@ -310,9 +292,15 @@ function App() {
 
   const pageTitle = route.page === "overview" ? t("Overview") : route.page === "initiative" ? t("Initiative detail") : route.page === "decision" ? t("Decision detail") : route.page === "submission" ? t("Submission detail") : route.page === "task" ? t("Task") : route.page === "agents" ? t("Agents") : localizedValue(t, route.page);
   const saveConnection = (next: Connection) => { writeConnection(next); setConnection(next); setShowConnection(false); };
+  const focusMain = (event?: MouseEvent<HTMLAnchorElement>) => {
+    event?.preventDefault();
+    const main = document.getElementById("main-content");
+    main?.focus();
+    main?.scrollIntoView({ block: "start" });
+  };
 
   return <div className="app-shell">
-    <a href="#main-content" className="skip-link">{t("Skip to main content")}</a>
+    <a href="#main-content" className="skip-link" onClick={focusMain}>{t("Skip to main content")}</a>
     <Sidebar route={route} open={mobileMenu} close={() => setMobileMenu(false)} />
     <header className="topbar">
       <button className="btn-icon mobile-menu-btn" type="button" title={t("Open menu")} aria-label={t("Open menu")} onClick={() => setMobileMenu((open) => !open)}><Menu aria-hidden="true" /></button>
@@ -851,14 +839,34 @@ function NewInitiativeDialog({ api, onClose }: { api: ThreadlineApi; onClose: ()
   const [intent, setIntent] = useState("");
   const [nextStep, setNextStep] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const dirty = title.trim().length > 0 || intent.trim().length > 0 || nextStep.trim().length > 0;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim() || !intent.trim()) return;
     setSaving(true);
-    try { const initiative = await api.createInitiative({ title: title.trim(), intent: intent.trim(), status: "active", next_step: nextStep.trim() || null }); onClose(); navigate(`initiative/${initiative.id}`); } finally { setSaving(false); }
+    setSaveError(null);
+    try {
+      const initiative = await api.createInitiative({ title: title.trim(), intent: intent.trim(), status: "active", next_step: nextStep.trim() || null });
+      onClose();
+      navigate(`initiative/${initiative.id}`);
+    } catch (error: unknown) {
+      setSaveError(error instanceof Error ? error.message : t("Something went wrong."));
+    } finally {
+      setSaving(false);
+    }
   };
-  return <Dialog title={t("New initiative")} onClose={onClose} dirty={dirty}><form onSubmit={submit}><div className="modal-body"><div className="field"><label htmlFor="initiative-title">{t("Title")}</label><input id="initiative-title" name="initiative-title" autoComplete="off" spellCheck="true" required value={title} onChange={(event) => setTitle(event.target.value)} /></div><div className="field"><label htmlFor="initiative-intent">{t("Intent")}</label><textarea id="initiative-intent" name="initiative-intent" spellCheck="true" rows={4} required value={intent} onChange={(event) => setIntent(event.target.value)} /></div><div className="field"><label htmlFor="initiative-next">{t("Next step")}</label><input id="initiative-next" name="initiative-next" autoComplete="off" value={nextStep} onChange={(event) => setNextStep(event.target.value)} /></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>{t("Cancel")}</button><button className="btn btn-primary" disabled={saving}>{saving ? t("Creating…") : t("Create initiative")}</button></div></form></Dialog>;
+  return <Dialog title={t("New initiative")} onClose={onClose} dirty={dirty}>
+    <form onSubmit={submit}>
+      <div className="modal-body">
+        {saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}
+        <div className="field"><label htmlFor="initiative-title">{t("Title")}</label><input id="initiative-title" name="initiative-title" autoComplete="off" spellCheck="true" required value={title} onChange={(event) => setTitle(event.target.value)} /></div>
+        <div className="field"><label htmlFor="initiative-intent">{t("Intent")}</label><textarea id="initiative-intent" name="initiative-intent" spellCheck="true" rows={4} required value={intent} onChange={(event) => setIntent(event.target.value)} /></div>
+        <div className="field"><label htmlFor="initiative-next">{t("Next step")}</label><input id="initiative-next" name="initiative-next" autoComplete="off" value={nextStep} onChange={(event) => setNextStep(event.target.value)} /></div>
+      </div>
+      <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>{t("Cancel")}</button><button className="btn btn-primary" disabled={saving}>{saving ? t("Creating…") : t("Create initiative")}</button></div>
+    </form>
+  </Dialog>;
 }
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -925,7 +933,7 @@ function Dialog({ title, children, onClose, dirty = false }: { title: string; ch
   }, [requestClose]);
 
   return <div className="modal-backdrop open" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) requestClose(); }}>
-    <section ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onKeyDown={(event) => { if (event.key === "Escape") event.stopPropagation(); }}>
+    <section ref={modalRef} className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       <header className="modal-header"><h2 id={titleId}>{title}</h2><button className="btn-icon" type="button" title={t("Close")} aria-label={t("Close")} onClick={() => requestClose()}><X aria-hidden="true" /></button></header>
       {children}
     </section>
