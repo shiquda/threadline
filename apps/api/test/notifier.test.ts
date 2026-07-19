@@ -45,6 +45,7 @@ describe("Telegram notification publisher", () => {
     const publisher = createTelegramPublisher({
       botToken: "test-bot-token",
       chatId: "test-chat-id",
+      publicUrl: "https://tl.example.com/",
       fetch: fetch as never,
     });
 
@@ -56,7 +57,22 @@ describe("Telegram notification publisher", () => {
     expect(JSON.parse(request.body as string)).toEqual({
       chat_id: "test-chat-id",
       text: expect.stringContaining("Which region should host Threadline?"),
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [[{ text: "Open decision", url: "https://tl.example.com/#decision/decision-1" }]],
+      },
     });
+  });
+
+  it("escapes submission content before sending HTML", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const publisher = createTelegramPublisher({ botToken: "test-bot-token", chatId: "test-chat-id", fetch: fetch as never });
+
+    await publisher.publish({ type: "alert_created", submission: { ...submission, kind: "alert", title: "<unsafe>", summary: "x & y" } });
+
+    expect(JSON.parse((fetch.mock.calls[0] as [string, RequestInit])[1].body as string).text).toContain("&lt;unsafe&gt;");
+    expect(JSON.parse((fetch.mock.calls[0] as [string, RequestInit])[1].body as string).text).toContain("x &amp; y");
   });
 
   it("retries failed delivery a limited number of times", async () => {
