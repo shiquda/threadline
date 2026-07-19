@@ -121,6 +121,34 @@ const migrations = [
         ON initiatives(lifecycle, blocker, owner, last_activity_at DESC);
     `,
   },
+  {
+    version: 3,
+    sql: `
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        initiative_id TEXT NOT NULL REFERENCES initiatives(id),
+        title TEXT NOT NULL,
+        detail TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        completed_at TEXT,
+        completed_by TEXT
+      );
+
+      CREATE TABLE task_submission_links (
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        submission_id TEXT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        PRIMARY KEY (task_id, submission_id)
+      );
+
+      CREATE INDEX idx_tasks_initiative ON tasks(initiative_id, status, updated_at DESC);
+      CREATE INDEX idx_task_submission_links_submission ON task_submission_links(submission_id, task_id);
+    `,
+  },
 ] as const;
 
 export function migrate(db: Database.Database): void {

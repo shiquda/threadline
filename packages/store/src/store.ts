@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import type {
   ActorContext,
   AuditEvent,
+  CreateTaskInput,
   CreateInitiativeInput,
   CreateSubmissionInput,
   Decision,
@@ -17,6 +18,8 @@ import type {
   ResolveDecisionInput,
   Submission,
   SubmissionResult,
+  Task,
+  UpdateTaskInput,
   UpdateInitiativeInput,
   UpdateNotificationInput,
   Workboard,
@@ -453,6 +456,106 @@ export class ThreadlineStore {
     }
     return (this.db.prepare("SELECT * FROM submissions ORDER BY created_at DESC").all() as SubmissionRow[])
       .map((row) => this.mapSubmission(row));
+  }
+
+  createTask(input: CreateTaskInput, idempotencyKey?: string): Task {
+    this.getInitiative(input.initiative_id);
+    const cached = this.readIdempotent<Task>(idempotencyKey, "task.create", input);
+    if (cached) return cached;
+    const timestamp = now();
+    const task: Task = {
+      id: randomUUID(),
+      initiative_id: input.initiative_id,
+      title: input.title,
+      detail: input.detail ?? null,
+      status: "open",
+      created_at: timestamp,
+      updated_at: timestamp,
+      created_by: input.actor.actor_name,
+      completed_at: null,
+      completed_by: null,
+    };
+    this.db.transaction(() => {
+      this.db.prepare(
+        `INSERT INTO tasks
+         (id, initiative_id, title, detail, status, created_at, updated_at, created_by, completed_at, completed_by)
+         VALUES (@id, @initiative_id, @title, @detail, @status, @created_at, @updated_at, @created_by, @completed_at, @completed_by)`,
+      ).run(task);
+      this.writeEvent("task", task.id, "task.created", input.actor, { initiative_id: task.initiative_id });
+      this.writeIdempotent(idempotencyKey, "task.create", input, task);
+    })();
+    return task;
+  }
+
+  getTask(id: string): Task {
+    const task = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Task | undefined;
+    if (!task) throw new StoreError("not_found", `Task ${id} was not found`);
+    return task;
+  }
+
+  listTasks(initiativeId: string): Task[] {
+    this.getInitiative(initiativeId);
+    return this.db.prepare("SELECT * FROM tasks WHERE initiative_id = ? ORDER BY status ASC, updated_at DESC")
+      .all(initiativeId) as Task[];
+  }
+
+  updateTask(id: string, input: UpdateTaskInput): Task {
+    const current = this.getTask(id);
+    const timestamp = now();
+    const status = input.status ?? current.status;
+    const changedStatus = status !== current.status;
+    const task: Task = {
+      ...current,
+      title: input.title ?? current.title,
+      detail: hasOwn(input, "detail") ? input.detail ?? null : current.detail,
+      status,
+      updated_at: timestamp,
+      completed_at: status === "completed" ? (current.completed_at ?? timestamp) : null,
+      completed_by: status === "completed" ? (current.completed_by ?? input.actor.actor_name) : null,
+    };
+    this.db.transaction(() => {
+      this.db.prepare(
+        `UPDATE tasks SET title = @title, detail = @detail, status = @status, updated_at = @updated_at,
+         completed_at = @completed_at, completed_by = @completed_by WHERE id = @id`,
+      ).run(task);
+      this.writeEvent("task", id, changedStatus ? `task.${status}` : "task.updated", input.actor, {
+        initiative_id: task.initiative_id,
+      });
+    })();
+    return task;
+  }
+
+  listTaskSubmissions(taskId: string): Submission[] {
+    this.getTask(taskId);
+    return (this.db.prepare(
+      `SELECT s.* FROM submissions s JOIN task_submission_links l ON l.submission_id = s.id
+       WHERE l.task_id = ? ORDER BY s.created_at DESC`,
+    ).all(taskId) as SubmissionRow[]).map((row) => this.mapSubmission(row));
+  }
+
+  linkTaskSubmission(taskId: string, submissionId: string, actor: ActorContext): void {
+    const task = this.getTask(taskId);
+    const submission = this.getSubmission(submissionId);
+    if (submission.initiative_id !== task.initiative_id) {
+      throw new StoreError("invalid_request", "Task and Submission must belong to the same Initiative");
+    }
+    const timestamp = now();
+    this.db.transaction(() => {
+      const result = this.db.prepare(
+        `INSERT OR IGNORE INTO task_submission_links(task_id, submission_id, created_at, created_by)
+         VALUES (?, ?, ?, ?)`,
+      ).run(taskId, submissionId, timestamp, actor.actor_name);
+      if (result.changes) this.writeEvent("task", taskId, "task.submission_linked", actor, { submission_id: submissionId });
+    })();
+  }
+
+  unlinkTaskSubmission(taskId: string, submissionId: string, actor: ActorContext): void {
+    this.getTask(taskId);
+    this.db.transaction(() => {
+      const result = this.db.prepare("DELETE FROM task_submission_links WHERE task_id = ? AND submission_id = ?")
+        .run(taskId, submissionId);
+      if (result.changes) this.writeEvent("task", taskId, "task.submission_unlinked", actor, { submission_id: submissionId });
+    })();
   }
 
   getDecision(id: string): Decision {

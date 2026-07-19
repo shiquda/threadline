@@ -8,13 +8,17 @@ import fastifyStatic from "@fastify/static";
 import {
   CreateInitiativeInputSchema,
   CreateSubmissionInputSchema,
+  CreateTaskInputSchema,
   DecisionStatusSchema,
   InitiativeStatusSchema,
   ResolveDecisionInputSchema,
   UpdateInitiativeInputSchema,
   UpdateNotificationInputSchema,
+  UpdateTaskInputSchema,
+  LinkTaskSubmissionInputSchema,
   type CreateInitiativeInput,
   type CreateSubmissionInput,
+  type CreateTaskInput,
   type Decision,
   type DecisionStatus,
   type InitiativeStatus,
@@ -22,6 +26,8 @@ import {
   type Submission,
   type UpdateInitiativeInput,
   type UpdateNotificationInput,
+  type UpdateTaskInput,
+  type LinkTaskSubmissionInput,
 } from "@threadline/protocol";
 import { StoreError, ThreadlineStore } from "@threadline/store";
 import Fastify, { type FastifyError, type FastifyInstance, type FastifyRequest } from "fastify";
@@ -49,6 +55,7 @@ const InitiativeQuerySchema = Type.Object({
 const SubmissionQuerySchema = Type.Object({
   initiative_id: Type.Optional(Type.String()),
 });
+const TaskQuerySchema = Type.Object({ initiative_id: Type.String() });
 const DecisionQuerySchema = Type.Object({
   status: Type.Optional(DecisionStatusSchema),
   initiative_id: Type.Optional(Type.String()),
@@ -201,6 +208,62 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
         (request.params as { id: string }).id,
         request.body as UpdateInitiativeInput,
       ),
+  );
+
+  app.post(
+    "/api/v1/tasks",
+    { schema: { body: CreateTaskInputSchema } },
+    async (request, reply) => reply.code(201).send(options.store.createTask(
+      request.body as CreateTaskInput,
+      idempotencyKey(request.headers),
+    )),
+  );
+
+  app.get(
+    "/api/v1/tasks",
+    { schema: { querystring: TaskQuerySchema } },
+    async (request) => options.store.listTasks((request.query as { initiative_id: string }).initiative_id),
+  );
+
+  app.get(
+    "/api/v1/tasks/:id",
+    { schema: { params: IdParamsSchema } },
+    async (request) => options.store.getTask((request.params as { id: string }).id),
+  );
+
+  app.patch(
+    "/api/v1/tasks/:id",
+    { schema: { params: IdParamsSchema, body: UpdateTaskInputSchema } },
+    async (request) => options.store.updateTask(
+      (request.params as { id: string }).id,
+      request.body as UpdateTaskInput,
+    ),
+  );
+
+  app.get(
+    "/api/v1/tasks/:id/submissions",
+    { schema: { params: IdParamsSchema } },
+    async (request) => options.store.listTaskSubmissions((request.params as { id: string }).id),
+  );
+
+  app.post(
+    "/api/v1/tasks/:id/submissions/:submissionId",
+    { schema: { params: Type.Object({ id: Type.String({ minLength: 1 }), submissionId: Type.String({ minLength: 1 }) }), body: LinkTaskSubmissionInputSchema } },
+    async (request, reply) => {
+      const params = request.params as { id: string; submissionId: string };
+      options.store.linkTaskSubmission(params.id, params.submissionId, (request.body as LinkTaskSubmissionInput).actor);
+      return reply.code(204).send();
+    },
+  );
+
+  app.patch(
+    "/api/v1/tasks/:id/submissions/:submissionId",
+    { schema: { params: Type.Object({ id: Type.String({ minLength: 1 }), submissionId: Type.String({ minLength: 1 }) }), body: LinkTaskSubmissionInputSchema } },
+    async (request, reply) => {
+      const params = request.params as { id: string; submissionId: string };
+      options.store.unlinkTaskSubmission(params.id, params.submissionId, (request.body as LinkTaskSubmissionInput).actor);
+      return reply.code(204).send();
+    },
   );
 
   app.post(

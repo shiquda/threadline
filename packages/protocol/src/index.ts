@@ -69,6 +69,8 @@ export const NotificationStatusSchema = Type.Union([
   Type.Literal("suppressed"),
 ]);
 
+export const TaskStatusSchema = Type.Union([Type.Literal("open"), Type.Literal("completed")]);
+
 export const ActorContextSchema = Type.Object(
   {
     actor_type: Type.Union([
@@ -169,6 +171,38 @@ export const AuditEventSchema = Type.Object({
   payload: Type.Union([Type.Record(Type.String(), Type.Unknown()), Type.Null()]),
   created_at: Type.String(),
 });
+
+export const TaskSchema = Type.Object({
+  id: Type.String(),
+  initiative_id: Type.String(),
+  title: Type.String(),
+  detail: Type.Union([Type.String(), Type.Null()]),
+  status: TaskStatusSchema,
+  created_at: Type.String(),
+  updated_at: Type.String(),
+  created_by: Type.String(),
+  completed_at: Type.Union([Type.String(), Type.Null()]),
+  completed_by: Type.Union([Type.String(), Type.Null()]),
+});
+
+export const CreateTaskInputSchema = Type.Object({
+  initiative_id: Type.String(),
+  title: Type.String({ minLength: 1, maxLength: 300 }),
+  detail: nullableOptional(Type.String({ maxLength: 10000 })),
+  actor: ActorContextSchema,
+}, { additionalProperties: false });
+
+export const UpdateTaskInputSchema = Type.Object({
+  title: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+  detail: nullableOptional(Type.String({ maxLength: 10000 })),
+  status: Type.Optional(TaskStatusSchema),
+  actor: ActorContextSchema,
+}, { additionalProperties: false, minProperties: 2 });
+
+export const LinkTaskSubmissionInputSchema = Type.Object({
+  submission_id: Type.String(),
+  actor: ActorContextSchema,
+}, { additionalProperties: false });
 
 export const CreateInitiativeInputSchema = Type.Object(
   {
@@ -307,12 +341,17 @@ export type AttentionPolicy = Static<typeof AttentionPolicySchema>;
 export type DecisionStatus = Static<typeof DecisionStatusSchema>;
 export type RiskLevel = Static<typeof RiskLevelSchema>;
 export type NotificationStatus = Static<typeof NotificationStatusSchema>;
+export type TaskStatus = Static<typeof TaskStatusSchema>;
 export type ActorContext = Static<typeof ActorContextSchema>;
 export type Initiative = Static<typeof InitiativeSchema>;
 export type Submission = Static<typeof SubmissionSchema>;
 export type Decision = Static<typeof DecisionSchema>;
 export type Notification = Static<typeof NotificationSchema>;
 export type AuditEvent = Static<typeof AuditEventSchema>;
+export type Task = Static<typeof TaskSchema>;
+export type CreateTaskInput = Static<typeof CreateTaskInputSchema>;
+export type UpdateTaskInput = Static<typeof UpdateTaskInputSchema>;
+export type LinkTaskSubmissionInput = Static<typeof LinkTaskSubmissionInputSchema>;
 export type CreateInitiativeInput = Static<typeof CreateInitiativeInputSchema>;
 export type InitiativeStateUpdateInput = Static<typeof InitiativeStateUpdateInputSchema>;
 export type UpdateInitiativeInput = Static<typeof UpdateInitiativeInputSchema>;

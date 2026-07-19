@@ -88,4 +88,29 @@ describe("ThreadlineStore core initiative projection", () => {
     });
     expect(store.getWorkboard().waiting).toMatchObject([{ id: initiative.id }]);
   });
+
+  it("manages project Tasks and links only same-project Submissions", () => {
+    const initiative = store.createInitiative({ title: "Project", intent: "Task scope", actor });
+    const other = store.createInitiative({ title: "Other", intent: "Other scope", actor });
+    const task = store.createTask({ initiative_id: initiative.id, title: "Ship API", actor }, "task-create");
+    expect(store.createTask({ initiative_id: initiative.id, title: "Ship API", actor }, "task-create")).toEqual(task);
+
+    const completed = store.updateTask(task.id, { status: "completed", actor });
+    expect(completed).toMatchObject({ status: "completed", completed_by: "builder" });
+    expect(store.updateTask(task.id, { status: "open", actor })).toMatchObject({ status: "open", completed_at: null });
+
+    const submission = store.createSubmission({
+      kind: "delivery", title: "API shipped", summary: "Complete", initiative_id: initiative.id,
+      attention_policy: "record_only", actor,
+    }).submission;
+    store.linkTaskSubmission(task.id, submission.id, actor);
+    store.linkTaskSubmission(task.id, submission.id, actor);
+    expect(store.listTaskSubmissions(task.id)).toMatchObject([{ id: submission.id }]);
+
+    const unrelated = store.createSubmission({
+      kind: "delivery", title: "Elsewhere", summary: "Other", initiative_id: other.id,
+      attention_policy: "record_only", actor,
+    }).submission;
+    expect(() => store.linkTaskSubmission(task.id, unrelated.id, actor)).toThrow("same Initiative");
+  });
 });

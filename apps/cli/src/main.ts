@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import type { ActorContext, AttentionPolicy, SubmissionKind } from "@threadline/protocol";
+import type { ActorContext, AttentionPolicy, SubmissionKind, Task } from "@threadline/protocol";
 import { Command, Option } from "commander";
 import { ApiError, request } from "./client.js";
 import {
@@ -452,6 +452,56 @@ initiative
   .action(async (options: { title: string; intent: string; status: string; nextStep?: string }) => {
     const context = await resolveContext();
     await write({ operation: "initiative.create", path: "/api/v1/initiatives", method: "POST", idempotent: true, body: { title: options.title, intent: options.intent, status: options.status, ...(options.nextStep ? { next_step: options.nextStep } : {}), actor: context.actor } }, context);
+  });
+
+const task = program.command("task").description("manage project-scoped Tasks");
+task
+  .command("create")
+  .requiredOption("--initiative <id>")
+  .requiredOption("--title <title>")
+  .option("--detail <detail>")
+  .action(async (options: { initiative: string; title: string; detail?: string }) => {
+    const context = await resolveContext();
+    await write({
+      operation: "task.create", path: "/api/v1/tasks", method: "POST", idempotent: true,
+      body: { initiative_id: options.initiative, title: options.title, ...(options.detail ? { detail: options.detail } : {}), actor: context.actor },
+    }, context);
+  });
+task
+  .command("list")
+  .requiredOption("--initiative <id>")
+  .action(async (options: { initiative: string }) => output(await request<Task[]>(`/api/v1/tasks?initiative_id=${encodeURIComponent(options.initiative)}`)));
+task.command("get <id>").action(async (id: string) => output(await request<Task>(`/api/v1/tasks/${id}`)));
+task
+  .command("update <id>")
+  .option("--title <title>")
+  .option("--detail <detail>")
+  .option("--clear-detail")
+  .option("--complete")
+  .option("--reopen")
+  .action(async (id: string, options: { title?: string; detail?: string; clearDetail?: boolean; complete?: boolean; reopen?: boolean }) => {
+    if (options.complete && options.reopen) throw new Error("Choose either --complete or --reopen.");
+    const context = await resolveContext();
+    await write({
+      operation: "task.update", path: `/api/v1/tasks/${id}`, method: "PATCH",
+      body: { ...(options.title ? { title: options.title } : {}), ...(options.clearDetail ? { detail: null } : options.detail ? { detail: options.detail } : {}), ...(options.complete ? { status: "completed" } : options.reopen ? { status: "open" } : {}), actor: context.actor },
+    }, context);
+  });
+const taskSubmission = task.command("submission").description("manage Task Submission links");
+taskSubmission.command("list <task-id>").action(async (id: string) => output(await request(`/api/v1/tasks/${id}/submissions`)));
+taskSubmission
+  .command("link <task-id>")
+  .requiredOption("--submission <id>")
+  .action(async (id: string, options: { submission: string }) => {
+    const context = await resolveContext();
+    await write({ operation: "task.submission.link", path: `/api/v1/tasks/${id}/submissions/${options.submission}`, method: "POST", body: { submission_id: options.submission, actor: context.actor } }, context);
+  });
+taskSubmission
+  .command("unlink <task-id>")
+  .requiredOption("--submission <id>")
+  .action(async (id: string, options: { submission: string }) => {
+    const context = await resolveContext();
+    await write({ operation: "task.submission.unlink", path: `/api/v1/tasks/${id}/submissions/${options.submission}`, method: "PATCH", body: { submission_id: options.submission, actor: context.actor } }, context);
   });
 initiative
   .command("list")
