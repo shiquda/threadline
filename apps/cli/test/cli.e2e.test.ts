@@ -35,7 +35,11 @@ describe("Threadline CLI", () => {
     await rm(resolve(configDirectory, "config.json"), { force: true });
   });
 
-  async function run(args: string[], useRuntimeEnvironment = true): Promise<unknown> {
+  async function run(
+    args: string[],
+    useRuntimeEnvironment = true,
+    environment: NodeJS.ProcessEnv = {},
+  ): Promise<unknown> {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       THREADLINE_URL: url,
@@ -57,8 +61,12 @@ describe("Threadline CLI", () => {
       delete env.THREADLINE_AGENT;
       delete env.THREADLINE_SESSION_ID;
     }
+    // The test runner can itself be inside a Codex harness. Native variables
+    // must be opt-in per test so they do not leak into unscoped assertions.
+    delete env.CODEX_THREAD_ID;
+    delete env.CODEX_SESSION_ID;
     const result = await execFileAsync(process.execPath, [cli, "--json", ...args], {
-      env,
+      env: { ...env, ...environment },
     });
     return JSON.parse(result.stdout.trim()) as unknown;
   }
@@ -265,6 +273,53 @@ describe("Threadline CLI", () => {
       "An absent session remains absent.",
     ], false)) as { context: { session_id?: string } };
     expect(noSession.context.session_id).toBeUndefined();
+  });
+
+  it("uses native Codex thread IDs and treats blank session values as absent", async () => {
+    const native = (await run([
+      "--dry-run",
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "Native Codex thread",
+      "--summary",
+      "The harness session is preserved.",
+    ], false, {
+      CODEX_THREAD_ID: "thr_native",
+      CODEX_SESSION_ID: "legacy-session",
+      THREADLINE_SESSION_ID: "",
+    })) as { context: { tool?: string; session_id?: string } };
+    expect(native.context).toMatchObject({ tool: "codex", session_id: "thr_native" });
+
+    const explicit = (await run([
+      "--dry-run",
+      "--session",
+      "thr_explicit",
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "Explicit session",
+      "--summary",
+      "Explicit input wins.",
+    ], false, { CODEX_THREAD_ID: "thr_native" })) as { context: { session_id?: string } };
+    expect(explicit.context.session_id).toBe("thr_explicit");
+
+    const blank = (await run([
+      "--dry-run",
+      "submission",
+      "create",
+      "--kind",
+      "delivery",
+      "--title",
+      "Blank session",
+      "--summary",
+      "Blank input is unscoped.",
+    ], false, { THREADLINE_SESSION_ID: "   " })) as { context: { session_id?: string } };
+    expect(blank.context.session_id).toBeUndefined();
   });
 
   it("explains deterministic dry-run writes and completion records delivery plus state", async () => {

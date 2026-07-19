@@ -61,7 +61,19 @@ threadline --version
 
 Install `skills/threadline-gateway/` into the Agent environment's standard Skills directory. For Codex, copy that folder to `$CODEX_HOME/skills/threadline-gateway/` (or `~/.codex/skills/threadline-gateway/` when `CODEX_HOME` is unset). Other Agent Skills-compatible environments can install the same folder without rewriting its instructions.
 
-Configure `THREADLINE_URL`, `THREADLINE_TOKEN`, `THREADLINE_TOOL`, and `THREADLINE_SESSION_ID` in the Agent environment. The CLI collects the current machine hostname automatically (or accepts `THREADLINE_ACTOR_HOST`), and `THREADLINE_RUNTIME` remains supported as a legacy fallback for `tool`. The Skill itself does not run a daemon or poll the Gateway.
+Configure `THREADLINE_URL`, `THREADLINE_TOKEN`, and `THREADLINE_TOOL` in the Agent environment. `THREADLINE_SESSION_ID` is optional: when a harness supplies a native continuous-conversation ID, preserve it exactly; when it does not, leave it unset and Threadline records the work in that Host/Tool's unscoped timeline. The CLI collects the current machine hostname automatically (or accepts `THREADLINE_ACTOR_HOST`), and `THREADLINE_RUNTIME` remains supported as a legacy fallback for `tool`. The Skill itself does not run a daemon or poll the Gateway.
+
+Optional adapters install only a harness hook or plugin and provide the current native ID to the CLI. They are not required for successful submissions:
+
+```bash
+threadline integration install codex
+threadline integration install claude-code
+threadline integration install opencode
+threadline integration install openclaw
+threadline integration status
+```
+
+Codex reads `CODEX_THREAD_ID` directly (with `CODEX_SESSION_ID` compatibility). Claude Code uses a managed `SessionStart` hook, OpenCode uses a managed `shell.env` plugin, and OpenClaw uses a managed `resolve_exec_env` plugin. Install, status, and remove are idempotent; use global `--dry-run` to inspect a change first.
 
 ## Docker deployment
 
