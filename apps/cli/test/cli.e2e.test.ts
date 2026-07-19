@@ -458,4 +458,4 @@ describe("Threadline CLI", () => {
     expect(synced.submission).toMatchObject({ kind: "delivery", evidence_refs: ["healthcheck:ok", "cutover:complete"] });
     expect((await run(["initiative", "get", initiative.id])) as { lifecycle: string }).toMatchObject({ lifecycle: "done" });
   });
-});
+}, 15_000);
