@@ -212,11 +212,13 @@ function SkeletonBlock({ className, width, height }: { className?: string; width
 }
 
 function SkeletonMetrics() {
-  return <div className="overview-metrics" aria-label="loading">{[1, 2, 3].map((index) => <div className="metric skeleton-metric" key={index}><SkeletonBlock width="40%" height="16px" /><SkeletonBlock width="55%" height="22px" /></div>)}</div>;
+  const { t } = useI18n();
+  return <div className="overview-metrics" role="status" aria-label={t("Loading…")}>{[1, 2, 3].map((index) => <div className="metric skeleton-metric" key={index}><SkeletonBlock width="40%" height="16px" /><SkeletonBlock width="55%" height="22px" /></div>)}</div>;
 }
 
 function SkeletonMiniList() {
-  return <div className="mini-list" aria-label="loading">{[1, 2, 3].map((index) => <div className="mini-inbox skeleton-row" key={index}><SkeletonBlock width="76px" height="20px" /><div className="skeleton-stack"><SkeletonBlock width="60%" height="16px" /><SkeletonBlock width="40%" height="13px" /></div></div>)}</div>;
+  const { t } = useI18n();
+  return <div className="mini-list" role="status" aria-label={t("Loading…")}>{[1, 2, 3].map((index) => <div className="mini-inbox skeleton-row" key={index}><SkeletonBlock width="76px" height="20px" /><div className="skeleton-stack"><SkeletonBlock width="60%" height="16px" /><SkeletonBlock width="40%" height="13px" /></div></div>)}</div>;
 }
 
 function OverviewSkeleton() {
@@ -227,19 +229,23 @@ function OverviewSkeleton() {
 }
 
 function InboxSkeleton() {
-  return <div className="inbox-list" aria-label="loading">{[1, 2, 3, 4].map((index) => <div className="inbox-item skeleton-row" key={index}><SkeletonBlock width="68px" height="20px" /><div className="skeleton-stack"><SkeletonBlock width="55%" height="16px" /><SkeletonBlock width="80%" height="13px" /><SkeletonBlock width="45%" height="12px" /></div><div className="item-actions skeleton-actions"><SkeletonBlock width="28px" height="28px" /><SkeletonBlock width="28px" height="28px" /><SkeletonBlock width="28px" height="28px" /></div></div>)}</div>;
+  const { t } = useI18n();
+  return <div className="inbox-list" role="status" aria-label={t("Loading…")}>{[1, 2, 3, 4].map((index) => <div className="inbox-item skeleton-row" key={index}><SkeletonBlock width="68px" height="20px" /><div className="skeleton-stack"><SkeletonBlock width="55%" height="16px" /><SkeletonBlock width="80%" height="13px" /><SkeletonBlock width="45%" height="12px" /></div><div className="item-actions skeleton-actions"><SkeletonBlock width="28px" height="28px" /><SkeletonBlock width="28px" height="28px" /><SkeletonBlock width="28px" height="28px" /></div></div>)}</div>;
 }
 
 function WorkboardSkeleton() {
-  return <div className="board" aria-label="loading">{[1, 2, 3, 4].map((index) => <section className="lane" key={index}><header className="lane-header"><SkeletonBlock width="100px" height="13px" /><SkeletonBlock width="24px" height="18px" /></header><div className="lane-body">{[1, 2].map((card) => <div className="work-card skeleton-card" key={card}><SkeletonBlock width="70%" height="16px" /><div className="skeleton-stack"><SkeletonBlock width="90%" height="13px" /><SkeletonBlock width="60%" height="13px" /></div><div className="skeleton-footer"><SkeletonBlock width="80px" height="20px" /><SkeletonBlock width="80px" height="12px" /></div></div>)}</div></section>)}</div>;
+  const { t } = useI18n();
+  return <div className="board" role="status" aria-label={t("Loading…")}>{[1, 2, 3, 4].map((index) => <section className="lane" key={index}><header className="lane-header"><SkeletonBlock width="100px" height="13px" /><SkeletonBlock width="24px" height="18px" /></header><div className="lane-body">{[1, 2].map((card) => <div className="work-card skeleton-card" key={card}><SkeletonBlock width="70%" height="16px" /><div className="skeleton-stack"><SkeletonBlock width="90%" height="13px" /><SkeletonBlock width="60%" height="13px" /></div><div className="skeleton-footer"><SkeletonBlock width="80px" height="20px" /><SkeletonBlock width="80px" height="12px" /></div></div>)}</div></section>)}</div>;
 }
 
 function DecisionsSkeleton() {
-  return <div className="table-wrap" aria-label="loading"><table className="data-table"><thead><tr>{["Question", "Options", "Risk", "Initiative", "Status", ""].map((label, index) => <th key={index}><SkeletonBlock width={label ? `${Math.max(40, label.length * 8)}px` : "28px"} height="11px" /></th>)}</tr></thead><tbody>{[1, 2, 3, 4].map((row) => <tr key={row}><td><SkeletonBlock width="85%" height="15px" /></td><td><SkeletonBlock width="70%" height="13px" /></td><td><SkeletonBlock width="60px" height="20px" /></td><td><SkeletonBlock width="60%" height="13px" /></td><td><SkeletonBlock width="70px" height="20px" /></td><td><SkeletonBlock width="56px" height="26px" /></td></tr>)}</tbody></table></div>;
+  const { t } = useI18n();
+  return <div className="table-wrap" role="status" aria-label={t("Loading…")}><table className="data-table"><thead><tr>{["Question", "Options", "Risk", "Initiative", "Status", ""].map((label, index) => <th key={index}><SkeletonBlock width={label ? `${Math.max(40, label.length * 8)}px` : "28px"} height="11px" /></th>)}</tr></thead><tbody>{[1, 2, 3, 4].map((row) => <tr key={row}><td><SkeletonBlock width="85%" height="15px" /></td><td><SkeletonBlock width="70%" height="13px" /></td><td><SkeletonBlock width="60px" height="20px" /></td><td><SkeletonBlock width="60%" height="13px" /></td><td><SkeletonBlock width="70px" height="20px" /></td><td><SkeletonBlock width="56px" height="26px" /></td></tr>)}</tbody></table></div>;
 }
 
 function DetailSkeleton() {
-  return <div className="detail-grid" aria-label="loading"><section className="panel"><div className="panel-body">{[1, 2, 3, 4].map((section) => <div className="panel-section skeleton-section" key={section}><h2><SkeletonBlock width="100px" height="12px" /></h2><SkeletonBlock width="100%" height="14px" /><SkeletonBlock width="92%" height="14px" /><SkeletonBlock width="60%" height="14px" /></div>)}</div></section><aside className="panel"><div className="panel-header"><h2><SkeletonBlock width="90px" height="18px" /></h2></div><div className="panel-body">{[1, 2, 3, 4, 5, 6].map((row) => <div className="skeleton-property" key={row}><SkeletonBlock width="80px" height="13px" /><SkeletonBlock width="65%" height="14px" /></div>)}</div></aside></div>;
+  const { t } = useI18n();
+  return <div className="detail-grid" role="status" aria-label={t("Loading…")}><section className="panel"><div className="panel-body">{[1, 2, 3, 4].map((section) => <div className="panel-section skeleton-section" key={section}><h2><SkeletonBlock width="100px" height="12px" /></h2><SkeletonBlock width="100%" height="14px" /><SkeletonBlock width="92%" height="14px" /><SkeletonBlock width="60%" height="14px" /></div>)}</div></section><aside className="panel"><div className="panel-header"><h2><SkeletonBlock width="90px" height="18px" /></h2></div><div className="panel-body">{[1, 2, 3, 4, 5, 6].map((row) => <div className="skeleton-property" key={row}><SkeletonBlock width="80px" height="13px" /><SkeletonBlock width="65%" height="14px" /></div>)}</div></aside></div>;
 }
 
 function RefreshIndicator({ refreshing, error, retry }: { refreshing: boolean; error: string | null; retry?: () => void }) {
@@ -253,11 +259,18 @@ function RefreshIndicator({ refreshing, error, retry }: { refreshing: boolean; e
   </div>;
 }
 
+function FormError({ message }: { message: string }) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { ref.current?.focus(); }, [message]);
+  return <div className="action-error" role="alert" tabIndex={-1} ref={ref}>{localizedError(t, message)}</div>;
+}
+
 function CopyValue({ value }: { value: string | null }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   if (!value) return <span>-</span>;
-  return <button className="copy-value" title={t("Copy session ID")} onClick={() => void navigator.clipboard.writeText(value).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1400); })}>{copied ? t("Copied") : value}<Copy size={13} aria-hidden="true" /></button>;
+  return <button className="copy-value" translate="no" title={t("Copy session ID")} onClick={() => void navigator.clipboard.writeText(value).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1400); })}>{copied ? t("Copied") : value}<Copy size={13} aria-hidden="true" /></button>;
 }
 
 function LanguageSelector() {
@@ -290,6 +303,13 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!mobileMenu) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setMobileMenu(false); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [mobileMenu]);
+
   const pageTitle = route.page === "overview" ? t("Overview") : route.page === "initiative" ? t("Initiative detail") : route.page === "decision" ? t("Decision detail") : route.page === "submission" ? t("Submission detail") : route.page === "task" ? t("Task") : route.page === "agents" ? t("Agents") : localizedValue(t, route.page);
   const saveConnection = (next: Connection) => { writeConnection(next); setConnection(next); setShowConnection(false); };
   const focusMain = (event?: MouseEvent<HTMLAnchorElement>) => {
@@ -303,7 +323,7 @@ function App() {
     <a href="#main-content" className="skip-link" onClick={focusMain}>{t("Skip to main content")}</a>
     <Sidebar route={route} open={mobileMenu} close={() => setMobileMenu(false)} />
     <header className="topbar">
-      <button className="btn-icon mobile-menu-btn" type="button" title={t("Open menu")} aria-label={t("Open menu")} onClick={() => setMobileMenu((open) => !open)}><Menu aria-hidden="true" /></button>
+      <button className="btn-icon mobile-menu-btn" type="button" title={mobileMenu ? t("Close menu") : t("Open menu")} aria-label={mobileMenu ? t("Close menu") : t("Open menu")} aria-expanded={mobileMenu} aria-controls="app-sidebar" onClick={() => setMobileMenu((open) => !open)}><Menu aria-hidden="true" /></button>
       <div className="topbar-title">{pageTitle}</div>
       <div className="topbar-actions">
         <button className="btn btn-secondary btn-sm desktop-only" type="button" onClick={() => setShowNewInitiative(true)}><Plus size={16} aria-hidden="true" />{t("New initiative")}</button>
@@ -333,8 +353,8 @@ function Sidebar({ route, open, close }: { route: Route; open: boolean; close: (
   const links = [
     ["overview", t("Overview"), LayoutDashboard], ["inbox", t("Inbox"), Inbox], ["workboard", t("Workboard"), ClipboardList], ["decisions", t("Decisions"), Scale], ["agents", t("Agents"), Network],
   ] as const;
-  return <aside className={`sidebar ${open ? "open" : ""}`}>
-    <div className="wordmark"><span className="wordmark-dot" />Threadline</div>
+  return <aside id="app-sidebar" className={`sidebar ${open ? "open" : ""}`}>
+    <div className="wordmark" translate="no"><span className="wordmark-dot" />Threadline</div>
     <nav aria-label={t("Primary navigation")}><ul className="nav-list">{links.map(([page, label, Icon]) => <li key={page}><a className={`nav-link ${route.page === page ? "active" : ""}`} href={`#${page}`} onClick={close}><Icon size={18} aria-hidden="true" />{label}</a></li>)}</ul></nav>
     <div className="sidebar-note">{t("Shared work context for humans and agents.")}</div>
   </aside>;
@@ -347,7 +367,7 @@ function Overview({ api, onNew }: { api: ThreadlineApi; onNew: () => void }) {
   const normalizedBoard = board ? normalizeWorkboard(board) : null;
   const initiatives = normalizedBoard ? uniqueInitiativeIds(normalizedBoard).size : 0;
   const open = decisions.filter((decision) => ["open", "seen"].includes(decision.status)).length;
-  return <PageHeader title="Threadline" subtitle={t("Human-Agent Gateway workbench - your shared source of attention and decisions.")} action={<button className="btn btn-primary" onClick={onNew}><Plus size={17} aria-hidden="true" />{t("New initiative")}</button>}>
+  return <PageHeader title="Threadline" subtitle={t("Human-Agent Gateway workbench — your shared source of attention and decisions.")} action={<button className="btn btn-primary" onClick={onNew}><Plus size={17} aria-hidden="true" />{t("New initiative")}</button>}>
     {data.loading && !data.value ? <OverviewSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load workspace")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : <>
       <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
       <section className="overview-metrics" aria-label={t("Workspace summary")}>
@@ -438,7 +458,7 @@ function InboxPage({ api }: { api: ThreadlineApi }) {
   const unread = (data.value ?? []).filter((item) => item.notification.status === "active");
   const hasActiveFilter = query || filter !== "all";
   return <PageHeader title={t("Inbox")} subtitle={scope === "unread" ? t("Only things that need your attention right now.") : t("All inbox messages, including those already read.")} action={<button className="btn btn-secondary btn-sm" disabled={!unread.length} onClick={() => void markAllRead()}>{t("Mark all read")}</button>}>
-    <div className="toolbar"><input className="search-input" type="search" name="inbox-search" value={query} onChange={(event) => setQueryParam(event.target.value)} placeholder={t("Search host, tool, session…")} aria-label={t("Search inbox")} /><div className="filter-groups"><div className="filter-group" role="group" aria-label={t("Message scope")}>{(["unread", "all"] as const).map((value) => <button key={value} className={`btn btn-sm ${scope === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setScopeParam(value)}>{t(value === "unread" ? "Unread" : "All messages")}</button>)}</div><div className="filter-group" role="group" aria-label={t("Message type")}>{["all", "decision", "delivery", "alert"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setFilterParam(value)}>{localizedValue(t, value)}</button>)}</div></div></div>
+    <div className="toolbar"><input className="search-input" type="search" name="inbox-search" autoComplete="off" value={query} onChange={(event) => setQueryParam(event.target.value)} placeholder={t("Search host, tool, session…")} aria-label={t("Search inbox")} /><div className="filter-groups"><div className="filter-group" role="group" aria-label={t("Message scope")}>{(["unread", "all"] as const).map((value) => <button key={value} className={`btn btn-sm ${scope === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setScopeParam(value)}>{t(value === "unread" ? "Unread" : "All messages")}</button>)}</div><div className="filter-group" role="group" aria-label={t("Message type")}>{["all", "decision", "delivery", "alert"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-secondary" : "btn-ghost"}`} onClick={() => setFilterParam(value)}>{localizedValue(t, value)}</button>)}</div></div></div>
     {actionError && <div className="action-error" role="alert">{localizedError(t, actionError)}</div>}
     <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
     {data.loading && !data.value ? <InboxSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load Inbox")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : !visible.length ? <StateBox title={hasActiveFilter ? t("No matching notifications") : scope === "all" ? t("No messages yet") : t("Inbox is clear")}>{hasActiveFilter ? t("Try a different search or filter.") : scope === "all" ? t("Messages you receive will appear here.") : t("New attention-worthy work will appear here.")}</StateBox> : <div className="inbox-list">{visible.map((item) => { const identity = executionIdentity(item.submission); return <article className={`inbox-item ${item.notification.status === "active" ? "unread" : ""}`} key={item.notification.id}><div className="item-kind"><Badge tone={item.decision ? "decision" : item.submission.kind}>{localizedValue(t, item.decision ? "decision" : item.submission.kind)}</Badge></div><div className="item-main"><div className="item-title">{item.submission.title}</div><div className="item-summary">{item.submission.summary}</div><div className="item-meta-row">{item.decision && <Badge tone={item.decision.risk_level}>{item.decision.status === "resolved" ? t("Resolved") : t("decision needed")}</Badge>}<span>{t("Host")}: <strong>{identity.host}</strong></span><span>{t("Tool")}: <strong>{identity.tool}</strong></span><CopyValue value={item.submission.session_id} />{item.initiative && <a href={`#initiative/${item.initiative.id}`}>{t("Initiative")}: <strong>{item.initiative.title}</strong></a>}<span>{formatDate(locale, item.submission.created_at)}</span></div></div><div className="item-actions">{item.notification.status === "active" && <IconAction label={t("Mark read")} disabled={pending === `${item.notification.id}:read`} onClick={() => void handleAction(item, "read")}><Check aria-hidden="true" /></IconAction>}<IconAction label={t("Snooze one day")} disabled={pending === `${item.notification.id}:snooze`} onClick={() => void handleAction(item, "snooze")}><Clock3 aria-hidden="true" /></IconAction><IconAction label={t("Archive")} disabled={pending === `${item.notification.id}:archive`} onClick={() => void handleAction(item, "archive")}><Archive aria-hidden="true" /></IconAction><a className="btn btn-secondary btn-sm" href={inboxItemHref(item)}>{item.decision ? t("Decide") : t("View")}</a></div></article>; })}</div>}
@@ -527,7 +547,7 @@ function DecisionsPage({ api }: { api: ThreadlineApi }) {
   const visible = decisions.filter((decision) => filter === "all" || (filter === "open" ? ["open", "seen"].includes(decision.status) : decision.status === "resolved"));
   const setFilterParam = (value: string) => setUrlParams({ filter: value === "open" ? null : value }, true);
   return <PageHeader title={t("Decision Registry")} subtitle={t("Open and closed decisions with risk, source session, and resolution.")}>
-    <div className="toolbar"><div className="filter-group">{["all", "open", "resolved"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilterParam(value)}>{localizedValue(t, value)}</button>)}</div></div>
+    <div className="toolbar"><div className="filter-group" role="group" aria-label={t("Decision status")}>{["all", "open", "resolved"].map((value) => <button key={value} className={`btn btn-sm ${filter === value ? "btn-primary" : "btn-secondary"}`} onClick={() => setFilterParam(value)}>{localizedValue(t, value)}</button>)}</div></div>
     {data.loading && !data.value ? <DecisionsSkeleton /> : data.error && !data.value ? <StateBox title={t("Could not load decisions")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : <>
       <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
       {!visible.length ? <StateBox title={t("No decisions here")}>{filter === "open" ? t("There are no decisions waiting to close.") : t("Decisions created by Agents will appear here.")}</StateBox> : <>
@@ -611,13 +631,13 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
   const isToolExpanded = (host: string, tool: string) => expandedTools.has(toolKey(host, tool));
 
   return <PageHeader title={t("Agents")} subtitle={t("Browse work by execution host, tool, and session.")}>
-    <div className="toolbar"><input className="search-input" type="search" name="agents-search" value={query} onChange={(event) => setQueryParam(event.target.value)} placeholder={t("Search host, tool, session…")} aria-label={t("Search agents")} /></div>
+    <div className="toolbar"><input className="search-input" type="search" name="agents-search" autoComplete="off" value={query} onChange={(event) => setQueryParam(event.target.value)} placeholder={t("Search host, tool, session…")} aria-label={t("Search agents")} /></div>
     {data.loading && !data.value ? <SkeletonMiniList /> : data.error && !data.value ? <StateBox title={t("Could not load agents")} retry={data.reload}>{localizedError(t, data.error)}</StateBox> : !totalHosts ? <StateBox title={t("No matching agents")}>{t("Agent work will appear here.")}</StateBox> : <>
       <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
       <div className="agents-layout">
         <section className="agents-index" aria-label={t("Agents")}>
           <header className="agents-index-header"><h2>{t("Host / Tool / Session")}</h2><span className="text-muted">{t("{count} hosts", { count: totalHosts })}</span></header>
-          <div className="agents-tree" role="tree">
+          <div className="agents-tree">
             {groups.map((hostNode) => (
               <div className="agents-host" key={hostNode.host}>
                 <button className={`agents-host-row ${hostNode.host === UNKNOWN_HOST ? "unknown" : ""}`} aria-expanded={isHostExpanded(hostNode.host)} onClick={() => toggleHost(hostNode.host)}>
@@ -639,7 +659,7 @@ function AgentsPage({ api }: { api: ThreadlineApi }) {
                             {toolNode.sessions.map((sessionNode) => {
                               const isSelected = selected?.host === hostNode.host && selected?.tool === toolNode.tool && selected?.session === sessionNode.session;
                               return <button key={sessionNode.session} className={`agents-session-row ${isSelected ? "selected" : ""} ${sessionNode.session === UNKNOWN_SESSION ? "unknown" : ""}`} aria-current={isSelected ? "true" : undefined} onClick={() => selectSession(hostNode.host, toolNode.tool, sessionNode.session)}>
-                                <span className="session-label">{sessionNode.session}</span>
+                                <span className="session-label" translate="no">{sessionNode.session}</span>
                                 <span className="session-meta">{t("{count} records", { count: sessionNode.submissions.length })}</span>
                               </button>;
                             })}
@@ -710,9 +730,9 @@ function TaskList({ api, initiativeId, tasks, reload }: { api: ThreadlineApi; in
   };
   return <DetailSection title={t("Tasks")}>
     <form className="resolve-form" onSubmit={create}>
-      {saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}
+      {saveError && <FormError message={saveError} />}
       <label htmlFor="task-title">{t("New task")}</label>
-      <div className="toolbar"><input id="task-title" name="task-title" autoComplete="off" spellCheck="true" value={title} onChange={(event) => setTitle(event.target.value)} required /><button className="btn btn-primary btn-sm" disabled={saving}>{saving ? t("Adding…") : t("Add")}</button></div>
+      <div className="toolbar"><input id="task-title" name="task-title" autoComplete="off" spellCheck="true" value={title} onChange={(event) => setTitle(event.target.value)} required /><button className="btn btn-primary btn-sm" disabled={saving}>{saving ? t("Adding…") : t("Add task")}</button></div>
     </form>
     {tasks.length ? <div className="linked-list">{tasks.map((task) => <div className="linked-row" key={task.id}><a href={`#task/${task.id}`}><strong>{task.title}</strong><span>{task.detail ?? t("No additional detail was provided.")}</span></a><div className="item-actions"><Badge tone={task.status}>{localizedValue(t, task.status)}</Badge><button className="btn btn-secondary btn-sm" onClick={() => void api.updateTask(task.id, { status: task.status === "completed" ? "open" : "completed" }).then(reload)}>{task.status === "completed" ? t("Reopen") : t("Complete")}</button></div></div>)}</div> : <p className="text-muted">{t("No tasks are linked yet.")}</p>}
   </DetailSection>;
@@ -752,7 +772,7 @@ function TaskDetail({ api, id }: { api: ThreadlineApi; id: string }) {
   return <PageHeader title={task.title} subtitle={`${t("Task")} · ${localizedValue(t, task.status)}`} action={<a className="btn btn-secondary btn-sm" href={`#initiative/${task.initiative_id}`}>{t("Back to initiative")}</a>}>
     <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Task")}>
       <form className="resolve-form" onSubmit={save}>
-        {saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}
+        {saveError && <FormError message={saveError} />}
         <label htmlFor="task-detail-title">{t("Title")}</label>
         <input id="task-detail-title" name="task-title" autoComplete="off" spellCheck="true" value={title} onChange={(event) => setTitle(event.target.value)} required />
         <label htmlFor="task-detail">{t("Details")}</label>
@@ -792,7 +812,7 @@ function DecisionDetail({ api, id }: { api: ThreadlineApi; id: string }) {
   const identity = submission ? executionIdentity(submission) : null;
   return <PageHeader title={decision.question} subtitle={`${t("Decision")} · ${localizedValue(t, decision.status)} · ${t("{status} risk", { status: localizedValue(t, decision.risk_level) })}`} action={<a className="btn btn-secondary btn-sm" href="#decisions">{t("Back to registry")}</a>}>
     <RefreshIndicator refreshing={data.refreshing} error={data.refreshError} retry={data.reload} />
-    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Question")}><p className="detail-copy">{decision.question}</p></DetailSection><DetailSection title={t("Options")}>{decision.options?.length ? <ul className="option-list">{decision.options.map((option) => <li key={option}>{option}</li>)}</ul> : <p className="text-muted">{t("No preset options were provided.")}</p>}</DetailSection>{decision.status !== "resolved" ? <DetailSection title={t("Close decision")}><form onSubmit={resolve} className="resolve-form">{saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}<label htmlFor="outcome">{t("Outcome")}</label><textarea id="outcome" name="outcome" spellCheck="true" value={outcome} onChange={(event) => setOutcome(event.target.value)} rows={4} placeholder={t("Record the decision and the reason for it.")} required /><p>{t("Closing this writes the same semantic event an Agent would produce via the CLI. The linked Inbox item will disappear.")}</p><button className="btn btn-primary" disabled={saving}>{saving ? t("Resolving…") : t("Close decision")}</button></form></DetailSection> : <DetailSection title={t("Resolution")}><p className="resolution">{decision.resolution}</p><p className="text-muted">{t("Resolved by {name} via {via} · {date}", { name: decision.resolved_by ?? "-", via: decision.resolved_via ?? "-", date: formatDate(locale, decision.resolved_at) })}</p></DetailSection>}<DetailSection title={t("Audit trail")}><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><Properties rows={[[t("ID"), decision.id], [t("Status"), <Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge>], [t("Risk"), <Badge tone={decision.risk_level}>{localizedValue(t, decision.risk_level)}</Badge>], [t("Host"), identity?.host ?? "-"], [t("Tool"), identity?.tool ?? "-"], [t("Session"), <CopyValue value={submission?.session_id ?? null} />], [t("Initiative"), initiative ? <a href={`#initiative/${initiative.id}`}>{initiative.title}</a> : "-"], [t("Created"), formatDate(locale, decision.created_at)]]} /></div></aside></div>
+    <div className="detail-grid"><section className="panel"><div className="panel-body"><DetailSection title={t("Question")}><p className="detail-copy">{decision.question}</p></DetailSection><DetailSection title={t("Options")}>{decision.options?.length ? <ul className="option-list">{decision.options.map((option) => <li key={option}>{option}</li>)}</ul> : <p className="text-muted">{t("No preset options were provided.")}</p>}</DetailSection>{decision.status !== "resolved" ? <DetailSection title={t("Close decision")}><form onSubmit={resolve} className="resolve-form">{saveError && <FormError message={saveError} />}<label htmlFor="outcome">{t("Outcome")}</label><textarea id="outcome" name="outcome" spellCheck="true" value={outcome} onChange={(event) => setOutcome(event.target.value)} rows={4} placeholder={t("Record the decision and the reason for it.")} required /><p>{t("Closing this writes the same semantic event an Agent would produce via the CLI. The linked Inbox item will disappear.")}</p><button className="btn btn-primary" disabled={saving}>{saving ? t("Resolving…") : t("Close decision")}</button></form></DetailSection> : <DetailSection title={t("Resolution")}><p className="resolution">{decision.resolution}</p><p className="text-muted">{t("Resolved by {name} via {via} · {date}", { name: decision.resolved_by ?? "-", via: decision.resolved_via ?? "-", date: formatDate(locale, decision.resolved_at) })}</p></DetailSection>}<DetailSection title={t("Audit trail")}><Timeline events={events} /></DetailSection></div></section><aside className="panel"><div className="panel-header"><h2>{t("Properties")}</h2></div><div className="panel-body"><Properties rows={[[t("ID"), decision.id], [t("Status"), <Badge tone={decision.status}>{localizedValue(t, decision.status)}</Badge>], [t("Risk"), <Badge tone={decision.risk_level}>{localizedValue(t, decision.risk_level)}</Badge>], [t("Host"), identity?.host ?? "-"], [t("Tool"), identity?.tool ?? "-"], [t("Session"), <CopyValue value={submission?.session_id ?? null} />], [t("Initiative"), initiative ? <a href={`#initiative/${initiative.id}`}>{initiative.title}</a> : "-"], [t("Created"), formatDate(locale, decision.created_at)]]} /></div></aside></div>
   </PageHeader>;
 }
 
@@ -859,7 +879,7 @@ function NewInitiativeDialog({ api, onClose }: { api: ThreadlineApi; onClose: ()
   return <Dialog title={t("New initiative")} onClose={onClose} dirty={dirty}>
     <form onSubmit={submit}>
       <div className="modal-body">
-        {saveError && <div className="action-error" role="alert">{localizedError(t, saveError)}</div>}
+        {saveError && <FormError message={saveError} />}
         <div className="field"><label htmlFor="initiative-title">{t("Title")}</label><input id="initiative-title" name="initiative-title" autoComplete="off" spellCheck="true" required value={title} onChange={(event) => setTitle(event.target.value)} /></div>
         <div className="field"><label htmlFor="initiative-intent">{t("Intent")}</label><textarea id="initiative-intent" name="initiative-intent" spellCheck="true" rows={4} required value={intent} onChange={(event) => setIntent(event.target.value)} /></div>
         <div className="field"><label htmlFor="initiative-next">{t("Next step")}</label><input id="initiative-next" name="initiative-next" autoComplete="off" value={nextStep} onChange={(event) => setNextStep(event.target.value)} /></div>
