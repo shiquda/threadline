@@ -96,9 +96,12 @@ This production Compose file binds the Gateway to `127.0.0.1` only.
 | `THREADLINE_TRUST_PROXY` | no | `false`; set `true` only behind the Cloudflare Tunnel |
 | `THREADLINE_TELEGRAM_BOT_TOKEN` | no | disabled unless paired with `THREADLINE_TELEGRAM_CHAT_ID` |
 | `THREADLINE_TELEGRAM_CHAT_ID` | no | disabled unless paired with `THREADLINE_TELEGRAM_BOT_TOKEN` |
+| `THREADLINE_PUBLIC_URL` | no | enables Telegram inline buttons linking to the Web record detail |
 | `THREADLINE_HTTP_PROXY` | no | none; use `http://127.0.0.1:7890` for local Clash |
 | `THREADLINE_NOTIFICATION_RETRY_ATTEMPTS` | no | `3`, including the initial attempt |
 
 When Telegram is configured, new Decision requests and Alert submissions are delivered as
-one-way messages. Delivery is asynchronous: Telegram errors are recorded in the API log
-without changing the successful creation of the underlying Threadline record.
+HTML-formatted one-way messages. Set `THREADLINE_PUBLIC_URL` to the public Web origin to add an
+inline button that opens the relevant Decision or Submission detail. Delivery is asynchronous:
+Telegram errors are recorded in the API log without changing the successful creation of the
+underlying Threadline record.
