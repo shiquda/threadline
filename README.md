@@ -7,6 +7,7 @@ Threadline includes a responsive Web workspace backed by the same API as its CLI
 ## Documentation
 
 - [MVP product and technical spec](docs/mvp-spec.md)
+- [Session identity and Agent timeline spec](docs/session-identity-and-agent-timeline-spec.md)
 - [UI design brief](docs/ui-design-brief.md)
 - [Agent Skill](skills/threadline-gateway/SKILL.md)
 - [VPS production deployment](docs/vps-deployment.md)
