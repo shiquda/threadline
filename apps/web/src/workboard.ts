@@ -130,7 +130,10 @@ export function uniqueInitiativeIds(board: NormalizedWorkboard): Set<string> {
 }
 
 function optionalText(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "none") return null;
+  return value;
 }
 
 export function initiativeRecord(initiative: InitiativeRecord) {

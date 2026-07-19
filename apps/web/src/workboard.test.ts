@@ -75,4 +75,21 @@ describe("Workboard adapter", () => {
       recordLanguage: null,
     });
   });
+
+  it("treats the 'none' sentinel as absent while preserving real values", () => {
+    expect(initiativeRecord({ blocker: "none", owner: "NONE", next_action: "  none  ", next_step: "Ship it" })).toEqual({
+      owner: null,
+      nextAction: "Ship it",
+      blocker: null,
+      recentFact: null,
+      recordLanguage: null,
+    });
+    expect(initiativeRecord({ blocker: "API rate limit", owner: "  Jim  " })).toEqual({
+      owner: "  Jim  ",
+      nextAction: null,
+      blocker: "API rate limit",
+      recentFact: null,
+      recordLanguage: null,
+    });
+  });
 });

@@ -304,7 +304,7 @@ textarea { resize: vertical; }
   .data-table { min-width: 0; }
 }
 
-@media (max-width: 1200px) { .board { grid-template-columns: repeat(2, minmax(240px, 1fr)); } }
+@media (max-width: 1280px) { .board { grid-template-columns: repeat(2, minmax(240px, 1fr)); } }
 @media (max-width: 992px) {
   .app-shell { grid-template-columns: 1fr; grid-template-areas: "topbar" "main"; }
   .sidebar { display: none; position: fixed; width: min(80vw, 280px); box-shadow: var(--shadow); }
