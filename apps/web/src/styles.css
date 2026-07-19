@@ -44,6 +44,10 @@ textarea { resize: vertical; }
 .topbar { grid-area: topbar; position: sticky; top: 0; z-index: 20; min-width: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .topbar-title { font-size: 18px; font-weight: 700; }
 .topbar-actions { display: flex; gap: 12px; align-items: center; }
+.language-selector { display: inline-flex; min-height: 30px; padding: 2px; border: 1px solid var(--border); border-radius: var(--r-input); background: var(--surface); }
+.language-selector button { min-width: 34px; min-height: 24px; padding: 1px 6px; border: 0; border-radius: 4px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 800; line-height: 1; }
+.language-selector button:hover { color: var(--fg); }
+.language-selector button.active { color: var(--fg); background: var(--bg); box-shadow: 0 1px 2px rgba(14, 15, 12, .08); }
 .user-chip { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border-radius: 999px; background: var(--surface); font-size: 14px; font-weight: 700; }
 .avatar { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: var(--bg); background: var(--fg); font-size: 12px; }
 .main { grid-area: main; min-width: 0; padding: 24px; overflow-x: auto; }
