@@ -24,6 +24,7 @@ export async function request<T>(
   if (authenticated) headers.set("authorization", `Bearer ${connection.token}`);
 
   const response = await fetch(`${connection.url}${path}`, { ...init, headers });
+  if (response.ok && response.status === 204) return undefined as T;
   const body = (await response.json()) as { code?: string; message?: string; details?: unknown };
   if (!response.ok) {
     throw new ApiError(

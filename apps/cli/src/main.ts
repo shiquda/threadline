@@ -90,7 +90,7 @@ function globalOptions(): GlobalOptions {
 }
 
 function output(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value, null, globalOptions().json ? 0 : 2)}\n`);
+  process.stdout.write(`${JSON.stringify(value === undefined ? null : value, null, globalOptions().json ? 0 : 2)}\n`);
 }
 
 function detectRuntime(): string | undefined {

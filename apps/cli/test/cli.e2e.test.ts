@@ -438,6 +438,29 @@ describe("Threadline CLI", () => {
 
     await run(["task", "update", explicitTask.id, "--complete"]);
     await run(["task", "update", attachedTask.id, "--complete"]);
+
+    const submission = (await run([
+      "submission",
+      "create",
+      "--kind",
+      "progress_update",
+      "--title",
+      "Task evidence",
+      "--summary",
+      "The task lifecycle test needs linked evidence.",
+      "--initiative",
+      initiative.id,
+      "--attention",
+      "record_only",
+    ])) as { submission: { id: string } };
+
+    expect(await run(["task", "submission", "link", explicitTask.id, "--submission", submission.submission.id])).toBeNull();
+    expect(await run(["task", "submission", "list", explicitTask.id])).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: submission.submission.id })]),
+    );
+    expect(await run(["task", "submission", "unlink", explicitTask.id, "--submission", submission.submission.id])).toBeNull();
+    expect(await run(["task", "submission", "list", explicitTask.id])).toEqual([]);
+
     await run(["done", initiative.id, "--summary", "All initiative Tasks are complete."]);
     expect(await run(["verify-complete", initiative.id])).toMatchObject({
       initiative_id: initiative.id,
