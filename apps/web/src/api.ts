@@ -11,7 +11,7 @@ import type {
 export type Connection = { url: string; token: string };
 
 const connectionKey = "threadline.connection";
-const apiUrl = (import.meta.env.VITE_THREADLINE_API_URL as string | undefined) ?? window.location.origin;
+const apiUrl = (import.meta.env.VITE_THREADLINE_API_URL as string | undefined) ?? (typeof window === "undefined" ? "" : window.location.origin);
 const apiToken = (import.meta.env.VITE_THREADLINE_TOKEN as string | undefined) ?? "";
 
 export function readConnection(): Connection {
@@ -44,8 +44,9 @@ export class ThreadlineApi {
     if (init?.body) headers.set("Content-Type", "application/json");
     let response: Response;
     try {
-      response = await fetch(url, { ...init, headers });
-    } catch {
+      response = await fetch(url, { ...init, headers, signal: init?.signal ?? null });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
       throw new ApiError(`Could not reach ${this.connection.url}. Check the Gateway URL.`);
     }
     if (!response.ok) {
@@ -55,19 +56,19 @@ export class ThreadlineApi {
     return response.json() as Promise<T>;
   }
 
-  inbox() { return this.request<InboxItem[]>("/api/v1/inbox"); }
-  workboard() { return this.request<Workboard>("/api/v1/workboard"); }
-  initiatives() { return this.request<Initiative[]>("/api/v1/initiatives"); }
-  initiative(id: string) { return this.request<Initiative>(`/api/v1/initiatives/${id}`); }
-  submissions(initiativeId?: string) {
-    return this.request<Submission[]>(`/api/v1/submissions${initiativeId ? `?initiative_id=${encodeURIComponent(initiativeId)}` : ""}`);
+  inbox(signal?: AbortSignal) { return this.request<InboxItem[]>("/api/v1/inbox", { signal: signal ?? null }); }
+  workboard(signal?: AbortSignal) { return this.request<Workboard>("/api/v1/workboard", { signal: signal ?? null }); }
+  initiatives(signal?: AbortSignal) { return this.request<Initiative[]>("/api/v1/initiatives", { signal: signal ?? null }); }
+  initiative(id: string, signal?: AbortSignal) { return this.request<Initiative>(`/api/v1/initiatives/${id}`, { signal: signal ?? null }); }
+  submissions(initiativeId?: string, signal?: AbortSignal) {
+    return this.request<Submission[]>(`/api/v1/submissions${initiativeId ? `?initiative_id=${encodeURIComponent(initiativeId)}` : ""}`, { signal: signal ?? null });
   }
-  submission(id: string) { return this.request<Submission>(`/api/v1/submissions/${id}`); }
-  decisions() { return this.request<Decision[]>("/api/v1/decisions"); }
-  decision(id: string) { return this.request<Decision>(`/api/v1/decisions/${id}`); }
-  events(entityType?: string, entityId?: string) {
+  submission(id: string, signal?: AbortSignal) { return this.request<Submission>(`/api/v1/submissions/${id}`, { signal: signal ?? null }); }
+  decisions(signal?: AbortSignal) { return this.request<Decision[]>("/api/v1/decisions", { signal: signal ?? null }); }
+  decision(id: string, signal?: AbortSignal) { return this.request<Decision>(`/api/v1/decisions/${id}`, { signal: signal ?? null }); }
+  events(entityType?: string, entityId?: string, signal?: AbortSignal) {
     const query = entityType && entityId ? `?entity_type=${entityType}&entity_id=${encodeURIComponent(entityId)}` : "";
-    return this.request<AuditEvent[]>(`/api/v1/events${query}`);
+    return this.request<AuditEvent[]>(`/api/v1/events${query}`, { signal: signal ?? null });
   }
   createInitiative(input: { title: string; intent: string; status: InitiativeStatus; next_step: string | null }) {
     return this.request<Initiative>("/api/v1/initiatives", {

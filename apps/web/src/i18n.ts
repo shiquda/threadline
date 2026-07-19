@@ -152,6 +152,8 @@ const zhCN: Record<string, string> = {
   "Something went wrong.": "发生错误。",
   "Gateway returned {status}.": "网关返回了 {status}。",
   "Could not reach {url}. Check the Gateway URL.": "无法连接到 {url}。请检查网关 URL。",
+  "Refreshing": "正在刷新",
+  "Retry": "重试",
   "just now": "刚刚",
   "{count} min ago": "{count} 分钟前",
   "{count} h ago": "{count} 小时前",
